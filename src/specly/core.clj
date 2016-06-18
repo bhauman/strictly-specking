@@ -44,6 +44,19 @@
        (map (juxt identity #(similar-key ky %)))
        (filter second)))
 
+
+(defprotocol FuzzySpec
+  (fuzzy-conform-score [_ x]))
+
+(defn spec-from-registry [spec-key]
+  (get (s/registry) spec-key))
+
+(defn fuzzy-spec? [spec-key]
+  (when-let [s (and spec-key (spec-from-registry spec-key))]
+       (satisfies? FuzzySpec s)))
+
+
+
 ;; score a spelling suggestion
 ;;  + 1 the value is a collection and conforms
 ;;  + 1 the value is complex and fuzzy conforms <-- TODO
@@ -55,11 +68,17 @@
 
 ;; to do this right this should be done with probabilities
 (defn score-suggestion [k->s map-x ky [suggested-key score]]
-  (let [key-val (get map-x ky)
-        valid  (s/valid? (k->s suggested-key) key-val)]
-    [suggested-key (cond-> (/ score 10)
-                     (and valid (coll? key-val)) dec
-                     valid dec)]))
+  (let [key-val  (get map-x ky)
+        key-spec (k->s suggested-key)
+        valid    (s/valid? key-spec key-val)]
+    [suggested-key
+     (cond-> (/ score 10)
+       ;; TODO: I don't think this is neccessary at all
+       (and valid (coll? key-val)) dec
+       valid dec
+       (and (not valid) (map? key-val) (fuzzy-spec? key-spec))
+       (- (or (fuzzy-conform-score (spec-from-registry key-spec) key-val)
+              0)))]))
 
 (defn spelling-suggestion [{:keys [k->s known-keys]} map-x ky]
   (->> (spelling-suggestions known-keys ky)
@@ -79,7 +98,7 @@
   
   (score-suggestion
    {:build-config :fig-opt/build-config}
-   {:build-confi {:id "asdf" :source-paths ["as"]}}
+   {:build-confi {:id "asdf" :source-paths 1 #_["as"]}}
    :build-confi [:build-config 1] )
   
   ;; if there are no suggestions we can look at keys that this complex value conforms to
@@ -129,79 +148,40 @@
 ;; the role of required and unrequired keys)  
 ;; -----
 
-(defprotocol FuzzySpec
-  (fuzzy-conform-score [_ x]))
-
-(defn spec-from-registry [spec-key]
-  (get (s/registry) spec-key))
-
-(defn fuzzy-spec? [spec-key]
-  (when-let [s (spec-from-registry spec-key)]
-       (satisfies? FuzzySpec s)))
-
 #_(merge-with + {} {:asdf 1} {:fda 1} {:fda 1})
 
-
-(defn avg [args]
-  (float
-   (/ (apply + args)
-      (count args))))
-
-#_(defn fuzzy-conform-score-helper [{:keys [known-keys  k->s] :as spec-key-data} map-x]
-    (when (map? map-x)
-      (let [key-to-score
-            (fn [[k v]]
-              (cond
-              (not (coll? v))
-              (if (s/valid? (k->s k) v)
-                {:good-value 1}
-                {:bad-value 1})
-              
-              ;; perhaps don't detract form score if bad value
-              (sequential? v)
-              (if (s/valid? (k->s k) v)
-                {:good-value 1}
-                {:bad-value 1})
-              
-              ;; if a sequence of maps? set a binding and recur??? good idea???
-              ;;   could put score result as meta data on conform result
-              
-              ;; recur if fuzzy
-              (and (map? v)
-                   (fuzzy-spec? (k->s k)))
-              (fuzzy-conform-score (spec-from-registry (k->s k)) v)
-              :else {}))
-            good-keys (filter known-keys (keys map-x))
-            good-key-val-score
-            (->> (select-keys map-x good-keys)
-                 (map key-to-score)
-               (apply merge-with +))
-            unk-keys          (filter (complement known-keys) (keys map-x))
-            adjusted-keys     (filter second
-                                      (map #(vector
-                                             %
-                                             (spelling-suggestion spec-key-data map-x %))
-                                           unk-keys))
-            bad-key-val-score (->> (map (fn [[oldk newk]] [newk (get map-x oldk)]) adjusted-keys)
-                                   (map key-to-score)
-                                   (apply merge-with +))]
-        (reduce (partial merge-with +)
-                [{:good-keys (+ (count good-keys) (count adjusted-keys))
-                  :bad-keys  (- (count unk-keys)  (count adjusted-keys))}
-                 good-key-val-score
-                 bad-key-val-score]))))
+;; ingnore nil average
+(defn- avg [args]
+  (when-let [args (not-empty (keep identity args))]
+    (/ (apply + args)
+       (count args))))
 
 ;; TODO clean this up
+;; integrate into :replace-key functionality
+;; and spelling scoring
+;; think about this and the shared functionality
+
+;; this should be memoized on a per call basis if specs are changing globally
 (defn fuzzy-conform-score-helper [{:keys [known-keys  k->s] :as spec-key-data} map-x]
   (when (map? map-x)
     (let [key-to-score
           (fn [[k v]]
-            (if (and (map? v)
-                     (fuzzy-spec? (k->s k)))
-              (or (fuzzy-conform-score (spec-from-registry (k->s k)) v) 1)
+            (cond
+              (map? v)
+              ;; could also check non fuzzy maps pretty easily right here if
+              ;; they are described as (s/keys )
+              (cond
+                (s/valid? (k->s k) v) 1
+                (fuzzy-spec? (k->s k))
+                (fuzzy-conform-score (spec-from-registry (k->s k)) v))
+
+              (and (sequential? v)
+                   (s/valid? (k->s k) v))
+              1
+              
               ;; if a sequence of maps? set a binding and recur??? good idea???
               ;;   could put score result as meta data on conform result
-              nil))
+              :else nil))
           good-keys (filter known-keys (keys map-x))
           unk-keys  (filter (complement known-keys) (keys map-x))
           adjusted-keys
@@ -211,30 +191,18 @@
           good-key-val-scores
           (->> (select-keys map-x good-keys)
                (keep key-to-score))
-          bad-key-val-scores (->> (map (fn [[oldk newk]] [newk (get map-x oldk)]) adjusted-keys)
-                                  (keep key-to-score))
-          unk-key-scores (repeat (- (count unk-keys)  (count adjusted-keys)) 0)]
-      (avg (map avg (keep not-empty [(concat (repeat (+ (count good-keys)
-                                                        (count adjusted-keys))
-                                                     1)
-                                             unk-key-scores)
-                                     (concat good-key-val-scores bad-key-val-scores)])))
-      #_(avg (concat (repeat (+ (count good-keys)
-                              (count adjusted-keys))
-                           1)
-                   good-key-val-scores bad-key-val-scores unk-key-scores))
-      #_(avg (concat good-key-val-scores bad-key-val-scores unk-key-scores))
-      #_(reduce (partial merge-with +)
-              [{:good-keys (+ (count good-keys) (count adjusted-keys))
-               :bad-keys  (- (count unk-keys)  (count adjusted-keys))}
-               good-key-val-score
-               bad-key-val-score]))))
+          adjusted-key-val-scores (->> (map (fn [[oldk newk]] [newk (get map-x oldk)]) adjusted-keys)
+                                       (keep key-to-score))
+          good-key-count (+ (count good-keys)
+                            (count adjusted-keys))
+          good-key-score (when-not (zero? (count map-x))
+                           (/ good-key-count
+                              (count map-x)))]
+      #_(prn (into (vec good-key-val-scores) adjusted-key-val-scores))
+      (avg [good-key-score
+            (avg (into (vec good-key-val-scores) adjusted-key-val-scores))]))))
 
-(avg [1 1 (avg [1 1 1 0]) 0 0])
 
-(avg [(avg [1 1 0 0]) (avg [1 1 1 0])])
-(avg [])
-(avg [1 1 1 1 1 0 0 0]) 
 (comment
 
   (fuzzy-conform-score-helper (parse-keys-args
@@ -244,16 +212,19 @@
                                :req-un [:fig-opt/build-config])
                               {;:http-server-root 1
                                :server-por 1
-                               :asdf 1
-                               :badly 3
+                               ;:asdf 1
+                               ;:badly 3
                                :build-confi {:id "asdf"
                                              :source-paths [""]
                                              :assert 1
-                                             :madly 2
+                                             ;:madly 2
 
                                               }}
                               )
+
   )
+
+
 
 ;; strict-keys
 
@@ -358,9 +329,6 @@
                                        :fig-opt/server-port
                                        :fig-opt/server-ip]
                               :req-un [:fig-opt/builds]))
-
-(satisfies? FuzzySpec
-           (get (s/registry) :project-top/figwheel))
 
 (comment
   
