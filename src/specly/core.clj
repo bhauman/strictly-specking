@@ -75,7 +75,7 @@
      (cond-> (/ score 10)
        ;; TODO: I don't think this is neccessary at all
        (and valid (coll? key-val)) dec
-       valid dec
+       valid (- 1/10) ;; a single letter difference for being an atomic value and correct
        (and (not valid) (map? key-val) (fuzzy-spec? key-spec))
        (- (or (fuzzy-conform-score (spec-from-registry key-spec) key-val)
               0)))]))
