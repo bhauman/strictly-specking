@@ -90,7 +90,6 @@
 
 ;; suggest a completely different key if its a complex value and it conforms to
 ;; another key that isn't already in the map
-(defn complies-to-other-key [])
 
 (comment
 
@@ -107,6 +106,64 @@
   
   (spelling-suggestions   #{:asdf/asdf :asdf/abg :asdfffff/a}  :asdf/asd )
   )
+
+
+;; suggest a completely different key if its a complex value and it conforms to
+;; another key that isn't already in the map
+
+;; when a key val is unknown we can rank it against all the keys that are not take in the map
+
+(defn replacement-suggestions [{:keys [k->s known-keys]} map-x ky]
+  (when-let [unused-keys (not-empty (filter (complement map-x) known-keys))]
+    (let [key-val (get map-x ky)]
+      (not-empty
+       (keep
+        (fn [k]
+          (let [unused-spec (k->s k)]
+            (cond
+              (and (coll? key-val)
+                   (s/valid? unused-spec key-val))
+              [k 1]
+              (map? key-val)
+              (cond
+                (s/valid? unused-spec key-val)
+                [k 1]
+                (fuzzy-spec? unused-spec)
+                (let [score (fuzzy-conform-score (spec-from-registry unused-spec) key-val)]
+                  (when (> score 6/10)
+                    [k score]))))))
+        unused-keys)))))
+
+(defn replacement-suggestion [key-spec-data map-x ky]
+  (->> (replacement-suggestions key-spec-data map-x ky)
+       (sort-by (comp - second))
+       ffirst))
+
+(s/explain :fig-opt/build-config {:id "asdf", :source-paths [""], :assert 1})
+
+(comment
+
+  (replacement-suggestion (parse-keys-args
+                            :opt-un [:fig-opt/http-server-root
+                                     :fig-opt/server-port
+                                     :fig-opt/server-ip]
+                            :req-un [:fig-opt/build-config])
+                           {;:http-server-root 1
+                            :server-por 1
+                                        ;:asdf 1
+                                        ;:badly 3
+                            :asdf {:id "asdf"
+                                   :source-paths [""]
+                                   :assert true
+                                   ;:madly 2
+                                   
+                                   }}
+                           :asdf
+                           )
+
+  )
+
+
 
 ;; thoughts about fuzzy conform
 ;; the reason for fuzzy conform is two fold
@@ -165,6 +222,7 @@
 (defn fuzzy-conform-score-helper [{:keys [known-keys  k->s] :as spec-key-data} map-x]
   (when (map? map-x)
     (let [key-to-score
+          
           (fn [[k v]]
             (cond
               (map? v)
@@ -263,10 +321,18 @@
                                  (assoc 
                                   ::misspelled-key unknown-key
                                   ::correct-key suggest))]
-                            [(conj pred-path :unknown-key unknown-key)
-                             (-> exp-data
-                                 #_(update-in [:in] conj unknown-key)
-                                 (assoc ::unknown-key unknown-key))]
+                            (if-let [replace-suggest (replacement-suggestion spec-key-data x unknown-key)]
+                              [(conj pred-path :misspelled-key unknown-key)
+                               (-> exp-data
+                                   #_(update-in [:in] conj unknown-key)
+                                   (assoc 
+                                    ::misspelled-key unknown-key
+                                    ::correct-key suggest))]
+                              [(conj pred-path :unknown-key unknown-key)
+                               (-> exp-data
+                                   #_(update-in [:in] conj unknown-key)
+                                   (assoc ::unknown-key unknown-key))])
+                            
                             )))))))))
       ;; These can be improved
       (gen* [_ a b c]
