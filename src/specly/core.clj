@@ -222,7 +222,6 @@
 (defn fuzzy-conform-score-helper [{:keys [known-keys  k->s] :as spec-key-data} map-x]
   (when (map? map-x)
     (let [key-to-score
-          
           (fn [[k v]]
             (cond
               (map? v)
@@ -317,23 +316,18 @@
                           (if-let [suggest (spelling-suggestion spec-key-data x unknown-key)]
                             [(conj pred-path :misspelled-key unknown-key)
                              (-> exp-data
-                                 #_(update-in [:in] conj unknown-key)
                                  (assoc 
                                   ::misspelled-key unknown-key
                                   ::correct-key suggest))]
                             (if-let [replace-suggest (replacement-suggestion spec-key-data x unknown-key)]
                               [(conj pred-path :misspelled-key unknown-key)
                                (-> exp-data
-                                   #_(update-in [:in] conj unknown-key)
                                    (assoc 
                                     ::misspelled-key unknown-key
                                     ::correct-key suggest))]
                               [(conj pred-path :unknown-key unknown-key)
                                (-> exp-data
-                                   #_(update-in [:in] conj unknown-key)
-                                   (assoc ::unknown-key unknown-key))])
-                            
-                            )))))))))
+                                   (assoc ::unknown-key unknown-key))]))))))))))
       ;; These can be improved
       (gen* [_ a b c]
         (s/gen* keys-spec a b c))
@@ -398,13 +392,14 @@
 
 (comment
   
-  (s/explain-str :project-top/figwheel {:hey 1
-                                      :there 2
-                                      :serve-port 1 #_"heyy"
+  (s/explain-str :project-top/figwheel {; :hey 1
+                                        ;:there 2
+                                      :server-por "heyy"
                                       ;:server-port "heyy"
-                                      :builds
+                                      :asdff
                                       [{:id :asdf
                                         :source-paths ["src"]}]})
+  
   
   )
 
