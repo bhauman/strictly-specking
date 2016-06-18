@@ -320,11 +320,11 @@
                                   ::misspelled-key unknown-key
                                   ::correct-key suggest))]
                             (if-let [replace-suggest (replacement-suggestion spec-key-data x unknown-key)]
-                              [(conj pred-path :misspelled-key unknown-key)
+                              [(conj pred-path :wrong-key unknown-key)
                                (-> exp-data
                                    (assoc 
-                                    ::misspelled-key unknown-key
-                                    ::correct-key suggest))]
+                                    ::wrong-key unknown-key
+                                    ::correct-key replace-suggest))]
                               [(conj pred-path :unknown-key unknown-key)
                                (-> exp-data
                                    (assoc ::unknown-key unknown-key))]))))))))))
