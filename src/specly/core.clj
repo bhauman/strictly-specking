@@ -9,6 +9,7 @@
                                     :id 1
                                     :source-paths 2}])
 ;; similar key implementation
+;; this can be improved based on the size of the word
 
 (defn- next-row
   [previous current other-seq]
@@ -139,10 +140,11 @@
        (sort-by (comp - second))
        ffirst))
 
-(s/explain :fig-opt/build-config {:id "asdf", :source-paths [""], :assert 1})
+
 
 (comment
-
+  (s/explain :fig-opt/build-config {:id "asdf", :source-paths [""], :assert 1})
+  
   (replacement-suggestion (parse-keys-args
                             :opt-un [:fig-opt/http-server-root
                                      :fig-opt/server-port
@@ -392,23 +394,7 @@
                       :opt-un [:fig-opt/car
                                :fig-opt/house]))
 
-;; this is really rough
-(defn seq-spec? [k]
-  {:pre [(keyword? k)]}
-  (s/regex? (spec-from-registry k)))
 
-(defn map-spec? [k]
-  {:pre [(keyword? k)]}
-  (prn k)
-  (#{'strict-keys 'keys}
-   (let [d (s/describe k)]
-     (and (sequential? d) (first d)))))
-
-(defn get-keys [k]
-  (->> k
-       s/describe
-       rest
-       (apply parse-keys-args)))
 
 ;; we are dealing with a datatype
 ;; a list of paths Monoid
@@ -429,6 +415,7 @@
 (def empty-path-set #{})
 (def consable-empty-path-set #{[]})
 
+;; a lifting operation
 ;; f -> PathSet -> PathSet
 (defn path-set-fmap [f path-set]
   (into #{} (mapv f path-set)))
@@ -437,7 +424,7 @@
   (or (not-empty path-set) consable-empty-path-set))
 
 (defn path-set-cons [v path-set]
-  (path-set-fmap #(cons v %) (consable-path-set path-set)))
+  (path-set-fmap #(cons v %) path-set #_(consable-path-set path-set)))
 
 ;; [PathSet] -> PathSet 
 (defn path-set-join [list-of-path-sets]
@@ -447,13 +434,11 @@
 (defn path-set-intersect [list-of-path-sets]
   (apply set/intersection list-of-path-sets))
 
-
-
-(defn key-paths [desc]
+(defn key-paths [f desc]
   {:pre [(sequential? desc)]}
   (let [{:keys [known-keys k->s]} (apply parse-keys-args (rest desc))]
     (path-set-join
-     (map #(path-set-cons (hash-map :ky % :ky-spec (k->s %)) (poss-path (k->s %)))
+     (map #(path-set-cons (hash-map :ky % :ky-spec (k->s %)) (poss-path f (k->s %)))
       known-keys))))
 
 ;; DecribeKeyedVals -> [DecribeVal]
@@ -463,38 +448,119 @@
 ;; DescribeVals -> [DescribeVal] 
 (def desc-vals rest)
 
+(def regex-ops #{'* '+ '? 'alt 'cat '&})
 
-(defn poss-path [desc]
-  #_(prn desc)
+(defn is-regex? [desc]
+  (or (and (sequential? desc)
+           (regex-ops (first desc)))
+      (and (keyword? desc)
+           (when-let [spec (spec-from-registry desc)]
+             (s/regex? spec)))
+      (s/regex? desc)))
+
+(declare poss-path)
+
+(def int-key {:ky ::int-key})
+
+(def int-key? #(= ::int-key (:ky %)))
+
+(defn regex-poss-path [f desc]
+  (let [path-set (poss-path f desc)]
+    (if (is-regex? desc)
+      ;; remove ::int-key from beginning of the paths
+      (path-set-fmap #(if (int-key? (first %)) (rest %) %)
+                     path-set)
+      path-set)))
+
+(defn expanded-map-of-desc? [desc]
+  (let [[and' [coll-of' [tuple' key-pred val-pred] empty-map'] map?'] desc]
+    (and (= and' 'and)
+         (= coll-of' 'coll-of)
+         (= tuple' 'tuple)
+         (= empty-map' {})
+         (= map?' 'map?))
+    [key-pred val-pred]))
+
+(defn handle-expanded-map-of [f desc]
+  (when-let [[ky-pred val-pred] (expanded-map-of-desc? desc)]
+    (poss-path f (list 'map-of ky-pred val-pred))))
+
+;; doesn't handle recursion
+;; this can be refactored into a more general movement through
+;; the structure
+;; can at the very least make sure this is lazy and we can then just grab the first couple of
+;; paths
+
+;; also need to make a suite of tests to verify that this is future proof
+;; and that our expectations about spec descriptions hold firm
+
+(defn poss-path [f desc]
   (if (and
        (keyword? desc)
        (spec-from-registry desc))
-    (poss-path (s/describe desc))
-    (condp = (and (sequential? desc)
-                  (first desc))
-      'keys (key-paths desc)
-      'strict-keys (key-paths desc)
-      'or    (path-set-join (map poss-path (desc-keyed-vals desc)))
-      ;; this is really the intersection paths
-      'and   (path-set-intersect (map poss-path (desc-vals desc)))
+    (let [res (f desc)]
+      (if (fn? res)
+        (poss-path res (s/describe desc))
+        res))
+    ;;#{[{:end-ref desc }]}
+    (let [poss-path       (partial poss-path f)
+          regex-poss-path (partial regex-poss-path f)
+          key-paths       (partial key-paths f)]
+      (condp = (and (sequential? desc)
+                    (first desc))
+        'keys        (key-paths desc)
+        'strict-keys (key-paths desc)
+        'or          (path-set-join (map poss-path
+                                         (desc-keyed-vals desc)))
+        ;; this is really the intersection of paths, but there is a notion of
+        ;; a infinite path set so ...
+        'and         (or (handle-expanded-map-of desc)
+                         (path-set-join (map poss-path (desc-vals desc))))
+        
+        '*     (path-set-cons int-key (regex-poss-path (second desc)))
+        '+     (path-set-cons int-key (regex-poss-path (second desc)))
+        '?     (path-set-cons int-key (regex-poss-path (second desc)))
+        'alt   (path-set-cons int-key
+                              (path-set-join (map regex-poss-path (desc-keyed-vals desc))))
+        'cat   (path-set-cons int-key
+                              (path-set-join (map regex-poss-path (desc-keyed-vals desc))))
+        '&     (path-set-cons int-key (regex-poss-path (second desc)))
+        ;; cat is a splicing operation something without a numeric path is going to get one consed on
+        
+        
+        'tuple   (path-set-cons int-key
+                                (path-set-join (map poss-path (desc-vals desc))))
+        'col-of       (path-set-cons int-key (poss-path (second desc)))
+        'col-checker  (path-set-cons int-key (poss-path (second desc)))
+        'map-of (let [key-predicate (second desc)]
+                  (path-set-cons {:ky ::pred-key :ky-pred-desc key-predicate}
+                                 (poss-path (last desc))))
+        'spec   (poss-path (second desc))
+        ;; 'cat   
+        ;; else
+        empty-path-set
+        
+        ))))
 
-      '*     (path-set-cons ::int-key (poss-path (second desc)))
-      '+     (path-set-cons ::int-key (poss-path (second desc)))
-      '?     (path-set-cons ::int-key (poss-path (second desc)))
-      'alt   (path-set-cons ::int-key
-                            (path-set-join (map poss-path (desc-keyed-vals desc))))
+(defn prevent-recursion-find [{:keys [path-keys-seen to] :as state}]
+  (fn [x]
+    (cond
+      (= x to) #{[]}
+      (path-keys-seen x) #{[]}
+      :else (prevent-recursion-find (update-in state [:path-keys-seen] conj x)))))
 
-      
-      ;; cat is a splicing operation something without a numeric path is going to get one consed on
-      
-      
-      
-      
-      ;; 'cat   
-      ;; else
-      empty-path-set
+(defn find-key-path [from to]
+  (poss-path
+   ;; can prevent recursion here easily
+   ;; but this monady approach makes me think that there is a better
+   ;; structure to the above
+   (prevent-recursion-find {:to to :path-keys-seen #{}})
+   (s/describe from)))
 
-      )))
+
+#_(find-key-path :fig-opt/real :fig-opt/car1)
+
+
 
 
 ;; regex NOTE
@@ -506,37 +572,20 @@
 ;; this is the equivalent of concatenation something that was a sublist becomes part of the
 ;; super list
 
-(re-matches #"((r+)*)?" "rrrrrrrr")
-
-(s/valid? (s/alt :hey even?
-                 :ouch even?) [4])
-
-(s/conform (s/cat :a even? :b (s/or :odd odd?
-                                    :even even?)) [4 3])
-
-
-(poss-path (s/describe (s/or :hi (s/or :hey :fig-opt/real)
+#_(poss-path (s/describe (s/or :hi (s/or :hey :fig-opt/real)
                                     :bye (s/or :son :fig-opt/car)
                                     :lei (s/or :son :fig-opt/house))))
 
-(poss-path (s/describe (s/and ;:hi (s/or :hey :fig-opt/real)
+#_(poss-path (s/describe (s/and ;:hi (s/or :hey :fig-opt/real)
                              (s/or :son :fig-opt/car)
                              (s/or :son :fig-opt/house))))
 
-(= (poss-path (s/describe (s/and :fig-opt/house)))
-   (poss-path (s/describe (s/or :son :fig-opt/house))))
+#_(= (poss-path (s/describe (s/and :fig-opt/house)))
+     (poss-path (s/describe (s/or :son :fig-opt/house))))
 
 #_(poss-path (s/describe :fig-opt/real))
 
-(defn possible-paths [rk]
-  (cond (map-spec? rk)
-        (when-let [{:keys [known-keys keys->specs]} (not-empty (get-keys rk))]
-          (prn known-keys)
-          (mapcat (fn [k]
-                  (map #(cons k %)
-                       (or (not-empty (possible-paths (keys->specs k)))
-                           [[]])))
-               known-keys))))
+
 
 (comment
   (seq-spec? :fig-opt/builds)
