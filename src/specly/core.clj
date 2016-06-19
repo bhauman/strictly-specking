@@ -369,6 +369,185 @@
 
 
 
+(s/def :fig-opt/housers1 string?)
+(s/def :fig-opt/housers2 string?)
+(s/def :fig-opt/housers3 string?)
+
+(s/def :fig-opt/house (strict-keys
+                       :opt-un [:fig-opt/housers1 
+                                :fig-opt/housers2 
+                                :fig-opt/housers3
+                                :fig-opt/car1]))
+
+(s/def :fig-opt/car1 string?)
+(s/def :fig-opt/car2 string?)
+(s/def :fig-opt/car3 string?)
+
+(s/def :fig-opt/car (strict-keys
+                      :opt-un [:fig-opt/car1
+                               :fig-opt/car2
+                               :fig-opt/car3]))
+
+(s/def :fig-opt/real (strict-keys
+                      :opt-un [:fig-opt/car
+                               :fig-opt/house]))
+
+;; this is really rough
+(defn seq-spec? [k]
+  {:pre [(keyword? k)]}
+  (s/regex? (spec-from-registry k)))
+
+(defn map-spec? [k]
+  {:pre [(keyword? k)]}
+  (prn k)
+  (#{'strict-keys 'keys}
+   (let [d (s/describe k)]
+     (and (sequential? d) (first d)))))
+
+(defn get-keys [k]
+  (->> k
+       s/describe
+       rest
+       (apply parse-keys-args)))
+
+;; we are dealing with a datatype
+;; a list of paths Monoid
+;; mempty   []
+;; mappend  cons
+;; mconcat  concat
+
+;; its also join and intersection
+;; join         set/union
+;; intersection set/intersection
+
+;; we need to cons a value to the head of each of the lists
+;; map-cons v list-of-paths 
+
+;;
+
+
+(def empty-path-set #{})
+(def consable-empty-path-set #{[]})
+
+;; f -> PathSet -> PathSet
+(defn path-set-fmap [f path-set]
+  (into #{} (mapv f path-set)))
+
+(defn consable-path-set [path-set]
+  (or (not-empty path-set) consable-empty-path-set))
+
+(defn path-set-cons [v path-set]
+  (path-set-fmap #(cons v %) (consable-path-set path-set)))
+
+;; [PathSet] -> PathSet 
+(defn path-set-join [list-of-path-sets]
+  (apply set/union list-of-path-sets))
+
+;; [PathSet] -> PathSet
+(defn path-set-intersect [list-of-path-sets]
+  (apply set/intersection list-of-path-sets))
+
+
+
+(defn key-paths [desc]
+  {:pre [(sequential? desc)]}
+  (let [{:keys [known-keys k->s]} (apply parse-keys-args (rest desc))]
+    (path-set-join
+     (map #(path-set-cons (hash-map :ky % :ky-spec (k->s %)) (poss-path (k->s %)))
+      known-keys))))
+
+;; DecribeKeyedVals -> [DecribeVal]
+(defn desc-keyed-vals [desc]
+  (vals (apply hash-map (rest desc))))
+
+;; DescribeVals -> [DescribeVal] 
+(def desc-vals rest)
+
+
+(defn poss-path [desc]
+  #_(prn desc)
+  (if (and
+       (keyword? desc)
+       (spec-from-registry desc))
+    (poss-path (s/describe desc))
+    (condp = (and (sequential? desc)
+                  (first desc))
+      'keys (key-paths desc)
+      'strict-keys (key-paths desc)
+      'or    (path-set-join (map poss-path (desc-keyed-vals desc)))
+      ;; this is really the intersection paths
+      'and   (path-set-intersect (map poss-path (desc-vals desc)))
+
+      '*     (path-set-cons ::int-key (poss-path (second desc)))
+      '+     (path-set-cons ::int-key (poss-path (second desc)))
+      '?     (path-set-cons ::int-key (poss-path (second desc)))
+      'alt   (path-set-cons ::int-key
+                            (path-set-join (map poss-path (desc-keyed-vals desc))))
+
+      
+      ;; cat is a splicing operation something without a numeric path is going to get one consed on
+      
+      
+      
+      
+      ;; 'cat   
+      ;; else
+      empty-path-set
+
+      )))
+
+
+;; regex NOTE
+;; so every regex has an ::int-key because they index into a sequence
+;; 
+
+;; all compond regex operators are splicing, meaning that they strip the :int-key off
+;; of the sub expression if they are regex
+;; this is the equivalent of concatenation something that was a sublist becomes part of the
+;; super list
+
+(re-matches #"((r+)*)?" "rrrrrrrr")
+
+(s/valid? (s/alt :hey even?
+                 :ouch even?) [4])
+
+(s/conform (s/cat :a even? :b (s/or :odd odd?
+                                    :even even?)) [4 3])
+
+
+(poss-path (s/describe (s/or :hi (s/or :hey :fig-opt/real)
+                                    :bye (s/or :son :fig-opt/car)
+                                    :lei (s/or :son :fig-opt/house))))
+
+(poss-path (s/describe (s/and ;:hi (s/or :hey :fig-opt/real)
+                             (s/or :son :fig-opt/car)
+                             (s/or :son :fig-opt/house))))
+
+(= (poss-path (s/describe (s/and :fig-opt/house)))
+   (poss-path (s/describe (s/or :son :fig-opt/house))))
+
+#_(poss-path (s/describe :fig-opt/real))
+
+(defn possible-paths [rk]
+  (cond (map-spec? rk)
+        (when-let [{:keys [known-keys keys->specs]} (not-empty (get-keys rk))]
+          (prn known-keys)
+          (mapcat (fn [k]
+                  (map #(cons k %)
+                       (or (not-empty (possible-paths (keys->specs k)))
+                           [[]])))
+               known-keys))))
+
+(comment
+  (seq-spec? :fig-opt/builds)
+  (s/describe :fig-opt/builds)
+  
+  (possible-paths :fig-opt/car)
+
+
+  )
+
+
 (s/def :build-config/id (s/or :string string? :keyword keyword?))
 (s/def :build-config/source-paths (s/+ string?))
 (s/def :build-config/assert #(or (true? %) (false? %)))
@@ -381,7 +560,7 @@
 (s/def :fig-opt/http-server-root string?)
 (s/def :fig-opt/server-port      integer?)
 (s/def :fig-opt/server-ip        string?)
-(s/def :fig-opt/builds           (s/+ :fig-opt/build-config))
+(s/def :fig-opt/builds           (s/* :fig-opt/build-config))
 
 
 (s/def :project-top/figwheel (strict-keys
@@ -389,6 +568,9 @@
                                        :fig-opt/server-port
                                        :fig-opt/server-ip]
                               :req-un [:fig-opt/builds]))
+
+
+
 
 (comment
   
