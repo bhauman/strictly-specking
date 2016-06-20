@@ -143,8 +143,36 @@
            :opt-un
            [:specly.core-test/a :specly.core-test/b])))
 
-  
-  
+  (is (= (s/describe (strict-keys :opt-un [::a ::b]
+                                  :opt [::c ::d]))
+         '(strict-keys
+           :opt
+           [:specly.core-test/c :specly.core-test/d]
+           :opt-un
+           [:specly.core-test/a :specly.core-test/b])))
+
+  (is (= (s/describe (s/map-of keyword? even?))
+         '(and (coll-of (tuple keyword? even?) {}) map?)))
+
+  (is (= (s/describe (s/or :yep (s/map-of keyword? even?)))
+         '(or :yep (map-of keyword? even?))))
+
+  (is (= (s/describe (s/and (s/map-of keyword? even?)))
+         '(and (map-of keyword? even?))))
+
+  (is (= (s/describe (s/coll-of keyword? []))
+         '(coll-checker keyword?)))
+
+  (is (= (s/describe (s/and (s/coll-of keyword? [])))
+         '(and (coll-of keyword? []))))
+
+  (is (= (s/describe (s/+ even?))
+         '(+ even?)))
+  (is (= (s/describe (s/* even?))
+         '(* even?)))
+  (is (= (s/describe (s/? even?))
+         '(? even?)))
+
   )
 
 (deftest pathfinding
