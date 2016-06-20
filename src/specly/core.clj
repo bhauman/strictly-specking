@@ -56,7 +56,7 @@
   (when-let [s (and spec-key (spec-from-registry spec-key))]
        (satisfies? FuzzySpec s)))
 
-
+(declare parse-keys-args poss-path)
 
 ;; score a spelling suggestion
 ;;  + 1 the value is a collection and conforms
@@ -232,8 +232,21 @@
               (cond
                 (s/valid? (k->s k) v) 1
                 (fuzzy-spec? (k->s k))
-                (fuzzy-conform-score (spec-from-registry (k->s k)) v))
+                (fuzzy-conform-score (spec-from-registry (k->s k)) v)
+                
+                ;; TODO extract as method
+                ;; consider making conform-score protocol private and having a general conform score
+                ;; to test for shape of either keys or strict-keys type
 
+                ;; this may be going to deep
+                :else
+                (when-let [s (spec-from-registry (k->s k))]
+                    (when (s/spec? s)
+                      (let  [d (s/describe s)]
+                        (when (#{'keys 'strict-keys} (first d))
+                          (fuzzy-conform-score-helper (apply parse-keys-args (rest d))
+                                                    v))))))
+              
               (and (sequential? v)
                    (s/valid? (k->s k) v))
               1
@@ -262,8 +275,28 @@
             (avg (into (vec good-key-val-scores) adjusted-key-val-scores))]))))
 
 
+
+
+
 (comment
 
+
+  
+  (fuzzy-conform-score (strict-keys :opt-un [:fig-opt/http-server-root
+                                             :fig-opt/server-port
+                                             :fig-opt/server-ip]
+                                    :req-un [:fig-opt/loose-build-config])
+                       {:http-server-root 1
+                        :server-port 1
+                        :asdf 3
+                        :loose-build-config {;:aaaaaaaaa "asdf"
+                                             ;:bbbbbbbb "asdf"
+                                             :cccccccc "asdf"
+                                             }
+                        }
+                       )
+  
+  
   (fuzzy-conform-score-helper (parse-keys-args
                                :opt-un [:fig-opt/http-server-root
                                         :fig-opt/server-port
@@ -422,8 +455,6 @@
 
   ;;
 
-(declare poss-path)
-
 (def empty-path-set #{})
 (def consable-empty-path-set #{[]})
 
@@ -469,8 +500,6 @@
            (when-let [spec (spec-from-registry desc)]
              (s/regex? spec)))
       (s/regex? desc)))
-
-(declare poss-path)
 
 (def int-key {:ky ::int-key})
 
@@ -571,6 +600,19 @@
 
 
 
+;; moving from errors to messages
+
+;; filtering errors
+;; upgrading unknown key errors to misplaced key errors or misplaced misspelled key errors
+;; could remove the possible missing required key errors caused by misspelling
+;; could remove the local versions of these errors in strict-keys
+
+
+
+
+;; filtering and sorting errors
+;; 
+
 
 
 
@@ -620,6 +662,11 @@
                                                        :build-config/id
                                                        :build-config/source-paths]
                                               :opt-un [:build-config/assert]))
+
+    (s/def :fig-opt/loose-build-config (s/keys :req-un [
+                                                        :build-config/id
+                                                        :build-config/source-paths]
+                                               :opt-un [:build-config/assert]))
     
     
     (s/def :fig-opt/http-server-root string?)
@@ -655,5 +702,6 @@
                                       [{:id :asdf
                                         :source-paths ["src"]}]})
   
-  
+
+  (remove-ns 'specly.core)
   )
