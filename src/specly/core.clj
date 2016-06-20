@@ -370,8 +370,7 @@
   [& args]
   ;; check the args with s/keys
   (let [form (macroexpand `(s/keys ~@args))]
-    (prn args)
-    `(strict-mapkeys-impl ~(apply specly.core/parse-keys-args args) ~form)))
+    `(strict-mapkeys-impl (specly.core/parse-keys-args ~@args) ~form)))
 
 
 
@@ -658,14 +657,3 @@
   
   
   )
-
-
-
-
-(specly.core/strict-keys :opt-un [:fig-opt/builds]
-                         :req [:fig-opt/builds])
-
-#_(with-meta :hey {:d 1})
-
-
-#_(s/def :builds  (s/cat :builds (s/+ ))  )
