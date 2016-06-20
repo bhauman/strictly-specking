@@ -289,7 +289,8 @@
 
 (defn strict-mapkeys-impl [{:keys [known-keys k->s] :as spec-key-data} keys-spec]
   {:pre [(set? known-keys)]}
-  (let [strict (s/spec-impl known-keys #(every? known-keys (keys %)) nil nil)]
+  (let [strict (s/spec-impl known-keys #(every? known-keys (keys %))
+                            nil nil)]
     (reify
       clojure.lang.IFn
       (invoke [this x] (and (keys-spec x) (strict x)))
@@ -308,28 +309,30 @@
         (not-empty
          (merge
           (s/explain* keys-spec path via in x)
-          (let [[pred-path exp-data]
-                (first (s/explain* strict path via in x))]
-            (into {}
-                  (->> (keys (:val exp-data))
-                       (filter (complement known-keys))
-                       (map
-                        (fn [unknown-key]
-                          (if-let [suggest (spelling-suggestion spec-key-data x unknown-key)]
-                            [(conj pred-path :misspelled-key unknown-key)
-                             (-> exp-data
+          (when (map? x)
+            (let [[pred-path exp-data]
+                  (first (s/explain* strict path via in x))]
+              (into {}
+                    (->> (keys (:val exp-data))
+                         (filter (complement known-keys))
+                         (map
+                          (fn [unknown-key]
+                            (if-let [suggest (spelling-suggestion spec-key-data x unknown-key)]
+                              [(conj pred-path :misspelled-key unknown-key)
+                               (-> exp-data
                                  (assoc 
                                   ::misspelled-key unknown-key
                                   ::correct-key suggest))]
-                            (if-let [replace-suggest (replacement-suggestion spec-key-data x unknown-key)]
-                              [(conj pred-path :wrong-key unknown-key)
-                               (-> exp-data
-                                   (assoc 
-                                    ::wrong-key unknown-key
-                                    ::correct-key replace-suggest))]
-                              [(conj pred-path :unknown-key unknown-key)
-                               (-> exp-data
-                                   (assoc ::unknown-key unknown-key))]))))))))))
+                              (if-let [replace-suggest (replacement-suggestion spec-key-data x unknown-key)]
+                                [(conj pred-path :wrong-key unknown-key)
+                                 (-> exp-data
+                                     (assoc 
+                                      ::wrong-key unknown-key
+                                      ::correct-key replace-suggest))]
+                                [(conj pred-path :unknown-key unknown-key)
+                                 (-> exp-data
+                                     (assoc ::unknown-key unknown-key))])))))))
+            ))))
       ;; These can be improved
       (gen* [_ a b c]
         (s/gen* keys-spec a b c))
@@ -367,50 +370,60 @@
   [& args]
   ;; check the args with s/keys
   (let [form (macroexpand `(s/keys ~@args))]
-    `(strict-mapkeys-impl ~(apply parse-keys-args args) ~form)))
+    (prn args)
+    `(strict-mapkeys-impl ~(apply specly.core/parse-keys-args args) ~form)))
 
 
 
-(s/def :fig-opt/housers1 string?)
-(s/def :fig-opt/housers2 string?)
-(s/def :fig-opt/housers3 string?)
+(comment
+  (do
+    (s/def :fig-opt/housers1 string?)
+    (s/def :fig-opt/housers2 string?)
+    (s/def :fig-opt/housers3 string?)
+    
+    (s/def :fig-opt/house (strict-keys
+                           :opt-un [:fig-opt/housers1 
+                                    :fig-opt/housers2 
+                                    :fig-opt/housers3
+                                    :fig-opt/car1]))
+    
+    (s/def :fig-opt/car1 string?)
+    (s/def :fig-opt/car2 string?)
+    (s/def :fig-opt/car3 string?)
+    
+    (s/def :fig-opt/car (strict-keys
+                         :opt-un [:fig-opt/car1
+                                  :fig-opt/car2
+                                  :fig-opt/car3]))
+    
+    (s/def :fig-opt/real (strict-keys
+                          :opt-un [:fig-opt/car
+                                   :fig-opt/house])
 
-(s/def :fig-opt/house (strict-keys
-                       :opt-un [:fig-opt/housers1 
-                                :fig-opt/housers2 
-                                :fig-opt/housers3
-                                :fig-opt/car1]))
-
-(s/def :fig-opt/car1 string?)
-(s/def :fig-opt/car2 string?)
-(s/def :fig-opt/car3 string?)
-
-(s/def :fig-opt/car (strict-keys
-                      :opt-un [:fig-opt/car1
-                               :fig-opt/car2
-                               :fig-opt/car3]))
-
-(s/def :fig-opt/real (strict-keys
-                      :opt-un [:fig-opt/car
-                               :fig-opt/house]))
+      )
+    
+    
+    )
+  )
 
 
 
-;; we are dealing with a datatype
-;; a list of paths Monoid
-;; mempty   []
-;; mappend  cons
-;; mconcat  concat
+  ;; we are dealing with a datatype
+  ;; a list of paths Monoid
+  ;; mempty   []
+  ;; mappend  cons
+  ;; mconcat  concat
 
-;; its also join and intersection
-;; join         set/union
-;; intersection set/intersection
+  ;; its also join and intersection
+  ;; join         set/union
+  ;; intersection set/intersection
 
-;; we need to cons a value to the head of each of the lists
-;; map-cons v list-of-paths 
+  ;; we need to cons a value to the head of each of the lists
+  ;; map-cons v list-of-paths 
 
-;;
+  ;;
 
+(declare poss-path)
 
 (def empty-path-set #{})
 (def consable-empty-path-set #{[]})
@@ -558,6 +571,14 @@
    (s/describe from)))
 
 
+
+
+
+
+
+
+
+
 #_(find-key-path :fig-opt/real :fig-opt/car1)
 
 
@@ -588,35 +609,39 @@
 
 
 (comment
-  (seq-spec? :fig-opt/builds)
+
   (s/describe :fig-opt/builds)
   
-  (possible-paths :fig-opt/car)
 
+  (do
+    (s/def :build-config/id (s/or :string string? :keyword keyword?))
+    (s/def :build-config/source-paths (s/+ string?))
+    (s/def :build-config/assert #(or (true? %) (false? %)))
+    (s/def :fig-opt/build-config (strict-keys :req-un [
+                                                       :build-config/id
+                                                       :build-config/source-paths]
+                                              :opt-un [:build-config/assert]))
+    
+    
+    (s/def :fig-opt/http-server-root string?)
+    (s/def :fig-opt/server-port      integer?)
+    (s/def :fig-opt/server-ip        string?)
+    (s/def :fig-opt/builds           (s/* :fig-opt/build-config))
+    
+    
+    (s/def :project-top/figwheel (strict-keys
+                                  :opt-un [:fig-opt/http-server-root
+                                           :fig-opt/server-port
+                                           :fig-opt/server-ip]
+                                  :req-un [:fig-opt/builds]))
+    
+
+    )
 
   )
 
 
-(s/def :build-config/id (s/or :string string? :keyword keyword?))
-(s/def :build-config/source-paths (s/+ string?))
-(s/def :build-config/assert #(or (true? %) (false? %)))
-(s/def :fig-opt/build-config (strict-keys :req-un [
-                                                   :build-config/id
-                                                   :build-config/source-paths]
-                                          :opt-un [:build-config/assert]))
 
-
-(s/def :fig-opt/http-server-root string?)
-(s/def :fig-opt/server-port      integer?)
-(s/def :fig-opt/server-ip        string?)
-(s/def :fig-opt/builds           (s/* :fig-opt/build-config))
-
-
-(s/def :project-top/figwheel (strict-keys
-                              :opt-un [:fig-opt/http-server-root
-                                       :fig-opt/server-port
-                                       :fig-opt/server-ip]
-                              :req-un [:fig-opt/builds]))
 
 
 
@@ -637,6 +662,8 @@
 
 
 
+(specly.core/strict-keys :opt-un [:fig-opt/builds]
+                         :req [:fig-opt/builds])
 
 #_(with-meta :hey {:d 1})
 
