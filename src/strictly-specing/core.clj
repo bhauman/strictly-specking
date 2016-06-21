@@ -1,11 +1,9 @@
-(ns specly.core
+(ns strictly-specking.core
   (:require
    [clojure.pprint :as pp]
    [clojure.string :as string]
    [clojure.set :as set]
    [clojure.spec :as s]))
-
-
 
 #_(s/explain :fig-opt/builds [{:compiler 1
                                     :id 1
@@ -405,7 +403,7 @@
   [& args]
   ;; check the args with s/keys
   (let [form (macroexpand `(s/keys ~@args))]
-    `(strict-mapkeys-impl (specly.core/parse-keys-args ~@args) ~form)))
+    `(strict-mapkeys-impl (strictly-specking.core/parse-keys-args ~@args) ~form)))
 
 
 
