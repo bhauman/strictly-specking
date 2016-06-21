@@ -1,11 +1,13 @@
 (ns specly.core
   (:require
+   [clojure.pprint :as pp]
+   [clojure.string :as string]
    [clojure.set :as set]
    [clojure.spec :as s]))
 
 
 
-#_(s/explain-data :fig-opt/builds [{:compiler 1
+#_(s/explain :fig-opt/builds [{:compiler 1
                                     :id 1
                                     :source-paths 2}])
 ;; similar key implementation
@@ -94,7 +96,7 @@
 
 (comment
 
-  (s/valid? :fig-opt/build-config {:id "asdf" :source-paths ["as"]})
+  (s/explain-data :fig-opt/build-config {:id "asdf" :source-paths ["as"]})
   
   (score-suggestion
    {:build-config :fig-opt/build-config}
@@ -599,19 +601,308 @@
    (s/describe from)))
 
 
+#_ (def terrors (s/explain-data :fig-opt/builds [{:compiler 1
+                                                   :id 1
+                                                    ;:source-paths 2
+                                                  }]))
 
 ;; moving from errors to messages
 
 ;; filtering errors
-;; upgrading unknown key errors to misplaced key errors or misplaced misspelled key errors
-;; could remove the possible missing required key errors caused by misspelling
-;; could remove the local versions of these errors in strict-keys
+;;  upgrading unknown key errors to misplaced key errors or misplaced misspelled key errors
+;;  could remove the possible missing required key errors caused by misspelling
+;;  could remove the local versions of these "duplicate" errors in strict-keys
+;;  perhaps add a reconizable type
+
+
+(defn missing-keys [error]
+  (when (sequential? (:pred error))
+    (->> (:pred error)
+     (map (fn [[cont _ id]]
+            (and (= cont 'contains?)
+                 (keyword? id)
+                 id)))
+     (filter identity)
+     not-empty)))
+
+#_(missing-keys {:pred '[(contains? % :id) (contais? % :source-paths)],
+               :val {:compiler 1},
+               :via [:fig-opt/builds :fig-opt/builds :fig-opt/build-config :fig-opt/build-config],
+               :in [0]})
+
+(defn error-type [error]
+  (cond
+    (error ::unknown-key)      ::unknown-key
+    (error ::misspelled-key)   ::misspelled-key
+    (error ::wrong-key)        ::wrong-key
+    (error ::missing-keys)     ::missing-required-keys
+    (and (= (:reason error) "Insufficient input")
+         (= (:val error) '())) ::should-not-be-empty
+    :else ::bad-value))
+
+(defn add-error-type [error]
+  (assoc error ::error-type (error-type error)))
+
+(defn add-required-keys [error]
+  (if-let [missing-required-keys (missing-keys error)]
+    (assoc error ::missing-keys (missing-keys error))
+    error))
+
+(defn filter-errors [problems]
+  (->> problems
+       (map (fn [[k v]] (assoc v :path k)))
+       (map add-required-keys)
+       (map add-error-type)))
+
+
+#_(filter-errors (::s/problems terrors))
+
+
+;; sorting errors
+;;  give types to errors
+;;  sort them by importance
+
+(def error-precedence
+  [::misspelled-key
+   ::wrong-key
+   ::missing-required-keys
+   ::unknown-key
+   ::should-not-be-empty
+   ::bad-value])
+
+(defn sort-errors [errors]
+  (sort-by
+   (fn [v] (let [pos (.indexOf error-precedence (::error-type v))]
+             (if (neg? pos) 10000 pos))) errors))
+
+;; error-message function
+;;   this will provide a more meaningful description of whats gone wrong
+;;   will delegete to a ns/key based error message if available
+
+;; temporary copy from spec until public fns make it into api
+(defn message-default-str
+  [{:keys [path pred val reason via in] :as prob}]
+  (with-out-str
+    (when-not (empty? in)
+      (print "In:" in ""))
+    (print "val: ")
+    (pr val)
+    (print " fails")
+    (when-not (empty? via)
+      (print " spec:" (last via)))
+    (when-not (empty? path)
+      (print " at:" path))
+    (print " predicate: ")
+    (pr pred)
+    (when reason (print ", " reason))
+    (doseq [[k v] prob]
+      (when-not (#{:pred :val :reason :via :in} k)
+        (print "\n\t" k " ")
+        (pr v)))
+    (newline)))
+
+#_(->> terrors
+      ::s/problems
+      filter-errors
+      sort-errors
+      #_(map message-default-str))
+
+;; TODO fill this out
+(def symbol-type-table
+  {'string? 'String
+   'keyword? 'Keyword })
+
+(defn handle-symbol-pred [sym]
+  (if-let [typ (symbol-type-table sym)]
+    (str "It should probably be a " (str typ))
+    (str "It should satisfy " (str sym))))
+
+(defn format-predicate-str [{:keys [pred] :as e}]
+  (cond
+    (symbol? pred) (handle-symbol-pred pred)
+    :else (str "It should satisfy "
+               (pr-str pred))))
+
+(defmulti error-message ::error-type)
+
+(defmethod error-message :default [e]
+  (message-default-str e))
+
+(defmethod error-message ::bad-value [{:keys [path pred val reason via in] :as e}]
+  (str "The key "
+       (pr-str (last in))
+       " has the wrong value. "
+       (format-predicate-str pred)))
+
+;; TODO: fill in the rest of the error types
+
+;; start on using pprint to print contextual errors
+
+(defn use-method
+  "Installs a function as a new method of multimethod associated with dispatch-value. "
+  [^clojure.lang.MultiFn multifn dispatch-val func]
+  (. multifn addMethod dispatch-val func))
+
+(defn into-multimethod
+  "Copies all of the methods from a source multimethod into the target multimethod.
+This makes it easier to override pprint functionality for certain types."
+  [target source]
+  {:pre [(= clojure.lang.MultiFn (class target))
+         (= clojure.lang.MultiFn (class source))]}
+  (doseq [[dispatch-val func] (.getMethodTable ^clojure.lang.MultiFn source)]
+    (use-method target dispatch-val func))
+  target)
+
+(defmulti error-path-dispatch
+  "The pretty print dispatch function for printing paths to errors in maps"
+  class)
+
+(defrecord CommentPointer [text])
+
+(into-multimethod error-path-dispatch pp/simple-dispatch)
+
+(defn pprint-map-with-pointer [amap]
+  (let [comments (or (-> amap meta :comments) {})
+        comments? (not-empty comments)]
+    
+    (.write ^java.io.Writer *out* "{")
+    (pp/pprint-indent :block 2)
+    #_(pp/pprint-newline (if comments?
+                         :linear :linear))
+    (pp/pprint-logical-block
+     (pp/print-length-loop
+      [aseq (seq amap)]
+      (when-let [[k v] (first aseq)]
+
+        (pp/pprint-logical-block 
+         (pp/write-out k)
+         (.write ^java.io.Writer *out* " ")
+         (pp/pprint-newline :linear)
+         ;; (set! pp/*current-length* 0)     ; always print both parts of the [k v] pair
+         (if-let [val-comment (-> comments k :value)]
+           (pp/pprint-logical-block
+            (pp/pprint-logical-block
+             (pp/write-out v))
+            (pp/pprint-newline :mandatory)
+            (pp/write-out val-comment)
+            #_(pp/pprint-newline :mandatory))
+           (pp/write-out v)))
+        (if-let [key-comment (-> comments k :key)]
+          (do
+            (pp/pprint-newline :mandatory)
+            (pp/write-out key-comment)
+            (pp/pprint-newline :mandatory))
+          (when (next aseq)
+            (.write ^java.io.Writer *out* " ")
+            (pp/pprint-newline (if comments?
+                                 :mandatory :linear))))
+        (if (next aseq)
+          (recur (next aseq))
+          (do
+            (.write ^java.io.Writer *out* "}")
+            #_(pp/pprint-newline :linear))
+          ))))))
+
+(defn pprint-comment-pointer [comm-point]
+  (pp/pprint-logical-block 
+   (pp/print-length-loop
+    [aseq (map symbol (string/split (:text comm-point) #"\n"))]
+    (pp/write-out (first aseq))
+    (pp/pprint-newline :linear)
+    (if (next aseq)
+      (recur (next aseq))
+      #_(pp/pprint-newline :mandatory)))))
+
+(do
+  (use-method error-path-dispatch clojure.lang.IPersistentMap pprint-map-with-pointer)
+  (use-method error-path-dispatch CommentPointer pprint-comment-pointer)
+  
+  (pp/with-pprint-dispatch error-path-dispatch
+    (pp/pprint (with-meta {:a 1 :b 2 :c 3
+                           :d {:asdfasdfasfd {:asdfasdfasdf 3}
+                               :asdfasdfasf {:asdfasdfasdf 3}}}
+                 {:comments {:c {:key (CommentPointer. "^--- is missing yep ")
+                                 :value (CommentPointer. "^--- is missing yep ")
+                                 :skip-value true
+                                 :key-color :bold
+                                 :value-color :red}}
+                  :color :none})))
+
+  (pp/with-pprint-dispatch error-path-dispatch
+    (pp/pprint {:cljsbuild {
+                             :builds [{ :id "example"
+                                       :source-paths 1 #_["src" #_"dev" #_"tests" #_"../support/src"]
+                                       :notify-command ["notify"]
+                                       :figwheel (with-meta
+                                                   { :websocket-host "localhost"
+                                                    :on-jsload      'example.core/fig-reload
+                                                    :on-message     'example.core/on-message
+                                        ; :open-urls ["http://localhost:3449/index.html"]
+                                        ; :debug true
+                                                    }
+                                                   {:comments {:on-jsload
+                                                               {:value (CommentPointer. "^--- hey")}}})
+                         :compiler { :main 'example.core
+                                     :asset-path "js/out"
+                                     :output-to "resources/public/js/example.js"
+                                     :output-dir "resources/public/js/out"
+                                     :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                     ;; :externs ["foreign/wowza-externs.js"]
+                                     :foreign-libs [{:file "foreign/wowza.js"
+                                                     :provides ["wowzacore"]}]
+                                     ;; :recompile-dependents true
+                                     :optimizations :none}}]}}))
+
+  
+  )
 
 
 
 
-;; filtering and sorting errors
-;; 
+
+
+
+;; create an extra error message addendum
+;;   
+
+;; create some functionality to add code context to errors if the
+;;   source-file(s) is known sjacket can be useful here
+
+;; printing errors
+;;   create a intermediate data structure - this will be useful for exception data
+;;     :error with the original error
+;;     :description a more meaningful description of whats gone wrong with an error message function
+;;     :error-on is this on :value or :key
+;;     :path to error key
+;;     :path-str  path printing -- explore using pprint to get rid of a dependency
+;;     :code-context -- error displayed along with code
+;;     :alternate-path
+;;     :alternate-path-str
+;;     :doc   docs
+;;  create a printer that outputs formatted error
+
+;; key based error message
+;;   hang a method off of an ns/keyword
+;;   it takes an error, the complete data structure, a path to the key
+;;   and it will provide a better error message than the stock one
+
+;; docs on keys
+;;   create a macro that stores docs on namespaced keys
+
+;; deeper error explain
+;;   hang a method off of a keyword
+;;   it takes an error, the complete data structure, a path to the key
+;;   and gives a more detailed explaination of why that value is the wrong value
+;;   this will hook into the main message error printing
+
+
+;; explain
+;;   create a macro that stores a method on a ns/key
+;;   that given all the config data, and a path to the key
+;;   that will provide an explanation of the behavior of that key
+;;   in its current value, in conjuntion with the rest of the configuration
+
+
 
 
 
@@ -672,7 +963,7 @@
     (s/def :fig-opt/http-server-root string?)
     (s/def :fig-opt/server-port      integer?)
     (s/def :fig-opt/server-ip        string?)
-    (s/def :fig-opt/builds           (s/* :fig-opt/build-config))
+    (s/def :fig-opt/builds           (s/+ :fig-opt/build-config))
     
     
     (s/def :project-top/figwheel (strict-keys
