@@ -51,29 +51,30 @@ This makes it easier to override pprint functionality for certain types."
      (pp/print-length-loop
       [aseq (seq amap)]
       (when-let [[k v] (first aseq)]
-        (pp/pprint-logical-block
-         (print-colored (get-in comments [k :key-colors])
-                        k)
-         (.write ^java.io.Writer *out* " ")
-         (pp/pprint-newline :linear)
-         ;; (set! pp/*current-length* 0)     ; always print both parts of the [k v] pair
-         (print-colored (get-in comments [k :value-colors])
-                        (if (and (comments k)
-                                 (coll? v))
-                          (vary-meta v assoc :abbrev :tight)
-                          v)))
-        (if-let [key-comment (-> comments k :comment)]
-          (do
-            (pp/pprint-newline :mandatory)
-            (print-colored (get-in comments [k :comment-colors]) key-comment)            
-            (pp/pprint-newline :mandatory))
+        (let [{:keys [comment key-colors value-colors comment-colors]
+               :as current-comment} (get comments k)]
+          (pp/pprint-logical-block
+           (print-colored key-colors k)
+           (.write ^java.io.Writer *out* " ")
+           (pp/pprint-newline :linear)
+           (print-colored value-colors
+                          (if (and current-comment (coll? v))
+                            (vary-meta v assoc :abbrev :tight)
+                            v)))
+          (if comment
+            (do
+              (pp/pprint-newline :mandatory)
+              (print-colored comment-colors comment)
+              (pp/pprint-newline :mandatory))
+            (when (next aseq)
+              (.write ^java.io.Writer *out* " ")
+              (pp/pprint-newline (if comments? #_(and comments?
+                                                   (not (-> amap meta :abbrev))
+                                                   ) 
+                                   :mandatory :linear))))
           (when (next aseq)
-            (.write ^java.io.Writer *out* " ")
-            (pp/pprint-newline (if (and comments?
-                                        (not (-> amap meta :abbrev))) 
-                                 :mandatory :linear))))
-        (when (next aseq)
-          (recur (next aseq))))))))
+            (recur (next aseq)))))))))
+
 
 (defn abbrev-pprint-map-with-pointer [amap]
   (if-let [abr-level  (-> amap meta :abbrev)]
