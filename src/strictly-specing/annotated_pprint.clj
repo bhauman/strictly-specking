@@ -52,23 +52,20 @@ This makes it easier to override pprint functionality for certain types."
       [aseq (seq amap)]
       (when-let [[k v] (first aseq)]
         (pp/pprint-logical-block
-         (print-colored (when-not (get-in comments [k :value])
-                          (get-in comments [k :key-colors]))
+         (print-colored (get-in comments [k :key-colors])
                         k)
          (.write ^java.io.Writer *out* " ")
          (pp/pprint-newline :linear)
          ;; (set! pp/*current-length* 0)     ; always print both parts of the [k v] pair
-         (if-let [val-comment (-> comments k :value)]
-           (pp/pprint-logical-block
-            (pp/pprint-logical-block
-             (print-colored (get-in comments [k :value-colors]) v))
-            (pp/pprint-newline :mandatory)
-            (print-colored (get-in comments [k :value-comment-colors]) val-comment))
-           (print-colored (get-in comments [k :value-colors]) v)))
-        (if-let [key-comment (-> comments k :key)]
+         (print-colored (get-in comments [k :value-colors])
+                        (if (and (comments k)
+                                 (coll? v))
+                          (vary-meta v assoc :abbrev :tight)
+                          v)))
+        (if-let [key-comment (-> comments k :comment)]
           (do
             (pp/pprint-newline :mandatory)
-            (print-colored (get-in comments [k :key-comment-colors]) key-comment)            
+            (print-colored (get-in comments [k :comment-colors]) key-comment)            
             (pp/pprint-newline :mandatory))
           (when (next aseq)
             (.write ^java.io.Writer *out* " ")
@@ -79,20 +76,19 @@ This makes it easier to override pprint functionality for certain types."
           (recur (next aseq))))))))
 
 (defn abbrev-pprint-map-with-pointer [amap]
-  (if (-> amap meta :abbrev)
-    (binding [*print-level* (+ 3 @(resolve 'clojure.pprint/*current-level*))
-              *print-length* 4]
-      (pprint-map-with-pointer amap))
+  (if-let [abr-level  (-> amap meta :abbrev)]
+    (let [length (if (= :tight abr-level) 2 4)
+          level  (if (= :tight abr-level) 2 3)]
+      (binding [*print-level* (+ level
+                                 (or @(resolve 'clojure.pprint/*current-level*) 0))
+                *print-length* length]
+        (pprint-map-with-pointer amap)))
     (pprint-map-with-pointer amap)))
 
-(defn pprint-comment-pointer [comm-point]
-  (pp/pprint-logical-block 
-   (pp/print-length-loop
-    [aseq (map symbol (string/split (:text comm-point) #"\n"))]
-    (pp/write-out (first aseq))
-    (pp/pprint-newline :linear)
-    (when (next aseq)
-      (recur (next aseq))))))
+(let [pprint-message (pp/formatter-out "^---- ~5I~@{~a~^ ~_~}~0I")]
+  (defn pprint-comment-pointer [comm-point]
+    (apply pprint-message (string/split (:text comm-point)
+                                  #"\n"))))
 
 (use-method error-path-dispatch clojure.lang.IPersistentMap abbrev-pprint-map-with-pointer)
 (use-method error-path-dispatch CommentPointer pprint-comment-pointer)
@@ -120,18 +116,20 @@ This makes it easier to override pprint functionality for certain types."
 (defn annotate-path [data path annotation]
   (path-only-data-structure data path #(vary-meta % merge annotation)))
 
-
-#_(cl/with-color-when true
-    (pp/with-pprint-dispatch error-path-dispatch
-      (pp/pprint
-       (annotate-path test-data
-                      [:cljsbuild :builds 0 :figwheel]
-                      {:abbrev true
-                       :comments {:on-jsload {:key-colors [:red]
-                                              :key-comment-colors [:magenta]
-                                              :key (CommentPointer. "^--- is missing yep ") }}})
-       
-       )))
+(cl/with-color-when true
+  (pp/with-pprint-dispatch error-path-dispatch
+    (pp/pprint
+     (annotate-path test-data
+                    [:cljsbuild :builds 0 :figwheel]
+                    {:abbrev true
+                     :comments {:compiler {;:value-colors [:red]
+                                           :key-colors [:green]
+                                           :value-colors [:red]
+                                           :comment-colors [:magenta]
+                                           :comment (CommentPointer. " is missing yep ")
+                                           }}})
+     
+     )))
 
 
 
@@ -150,8 +148,8 @@ This makes it easier to override pprint functionality for certain types."
                                  :asdfasdfasf {:asdfasdfasdf 3}}
                              :f {:asdfasdfasfd {:asdfasdfasdf 3}
                                  :asdfasdfasf {:asdfasdfasdf 3}}}
-                   {:comments {:c {:key (CommentPointer. "^--- is missing yep ") 
-                                   ; :value (CommentPointer. "^--- is missing yep ") 
+                   {:comments {:c {:key (CommentPointer. "is missing yep ") 
+                                   ; :value (CommentPointer. "is missing yep ") 
                                    :skip-value true
                                    ;:key-comment-colors   [:green]
                                    
@@ -175,7 +173,8 @@ This makes it easier to override pprint functionality for certain types."
                            :figwheel
                            { :websocket-host "localhost"
                             :compiler { :main 'example.core
-                                      :asset-path "js/out"
+                                       :asset-path "js/out"
+                                       :libsers ["libs_src" "libs_sscr/tweaky.js"]
                                       :output-to "resources/public/js/example.js"
                                       :output-dir "resources/public/js/out"
                                       :libs ["libs_src" "libs_sscr/tweaky.js"]
@@ -232,11 +231,13 @@ This makes it easier to override pprint functionality for certain types."
   )
 
 
-#_
-(binding [pp/*print-right-margin* 60
-          *print-level* 8]
+
+(binding [;pp/*print-right-margin* 80
+          ;*print-level* 8
+          ]
   
-  (pp/with-pprint-dispatch error-path-dispatch
+  (cl/with-color
+    (pp/with-pprint-dispatch error-path-dispatch
     (pp/pprint {:cljsbuild {
                             :builds [{ :id "example"
                                       :source-paths 1 #_["src" #_"dev" #_"tests" #_"../support/src"]
@@ -249,7 +250,9 @@ This makes it easier to override pprint functionality for certain types."
                                         ; :debug true
                                                    }
                                                   {:comments {:on-jsload
-                                                              {:value (CommentPointer. "^--- hey")}}})
+                                                              {:value-comment-colors [:red]
+                                                               :key-colors [:green]
+                                                               :value (CommentPointer. "hey asdf asdf asdf asdf\n asdf asdf as df as df asd f asd fa sd fa \n sd f asd fa sd f asd f asd fasd fa sdf a sdf asdf a sdf a\n sdf a sdf a sdf")}}})
                                       :compiler { :main 'example.core
                                                  :asset-path "js/out"
                                                  :output-to "resources/public/js/example.js"
@@ -259,7 +262,7 @@ This makes it easier to override pprint functionality for certain types."
                                                  :foreign-libs [{:file "foreign/wowza.js"
                                                                  :provides ["wowzacore"]}]
                                                  ;; :recompile-dependents true
-                                                 :optimizations :none}}]}})))
+                                                 :optimizations :none}}]}}))))
 
 #_(binding [*print-level* 4]
   (pp/pprint {:cljsbuild {
