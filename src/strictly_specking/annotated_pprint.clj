@@ -58,13 +58,15 @@ This makes it easier to override pprint functionality for certain types."
            (.write ^java.io.Writer *out* " ")
            (pp/pprint-newline :linear)
            (print-colored value-colors
-                          (if (and current-comment (coll? v))
+                          (if (and current-comment
+                                   (coll? v)
+                                   (-> amap meta :abbrev))
                             (vary-meta v assoc :abbrev :tight)
                             v)))
           (if comment
             (do
               (pp/pprint-newline :mandatory)
-              (print-colored comment-colors comment)
+              (print-colored comment-colors (CommentPointer. comment))
               (pp/pprint-newline :mandatory))
             (when (next aseq)
               (.write ^java.io.Writer *out* " ")
@@ -74,7 +76,6 @@ This makes it easier to override pprint functionality for certain types."
                                    :mandatory :linear))))
           (when (next aseq)
             (recur (next aseq)))))))))
-
 
 (defn abbrev-pprint-map-with-pointer [amap]
   (if-let [abr-level  (-> amap meta :abbrev)]
@@ -88,8 +89,7 @@ This makes it easier to override pprint functionality for certain types."
 
 (let [pprint-message (pp/formatter-out "^---- ~5I~@{~a~^ ~_~}~0I")]
   (defn pprint-comment-pointer [comm-point]
-    (apply pprint-message (string/split (:text comm-point)
-                                  #"\n"))))
+    (apply pprint-message (string/split (:text comm-point) #"\n"))))
 
 (use-method error-path-dispatch clojure.lang.IPersistentMap abbrev-pprint-map-with-pointer)
 (use-method error-path-dispatch CommentPointer pprint-comment-pointer)
@@ -114,58 +114,17 @@ This makes it easier to override pprint functionality for certain types."
       :else data)
     (f data)))
 
-(defn annotate-path [data path annotation]
+(defn annotate-path-only [data path annotation]
   (path-only-data-structure data path #(vary-meta % merge annotation)))
 
-(cl/with-color-when true
-  (pp/with-pprint-dispatch error-path-dispatch
-    (pp/pprint
-     (annotate-path test-data
-                    [:cljsbuild :builds 0 :figwheel]
-                    {:abbrev true
-                     :comments {:compiler {;:value-colors [:red]
-                                           :key-colors [:green]
-                                           :value-colors [:red]
-                                           :comment-colors [:magenta]
-                                           :comment (CommentPointer. " is missing yep ")
-                                           }}})
-     
-     )))
+(defn annotate-path [data path annotation]
+  (update-in data path #(vary-meta % merge annotation)))
 
-
-
-
-
-#_(do
-  (use-method error-path-dispatch clojure.lang.IPersistentMap abbrev-pprint-map-with-pointer)
-  (use-method error-path-dispatch CommentPointer pprint-comment-pointer)
-  
-  (cl/with-color-when true
-    (pp/with-pprint-dispatch error-path-dispatch
-      (pp/pprint (with-meta {:a 1 :b 2 :c [1 2 3 4 5 6]
-                             :d {:asdfasdfasfd {:asdfasdfasdf 3}
-                                 :asdfasdfasf {:asdfasdfasdf 3}}
-                             :e {:asdfasdfasfd {:asdfasdfasdf 3}
-                                 :asdfasdfasf {:asdfasdfasdf 3}}
-                             :f {:asdfasdfasfd {:asdfasdfasdf 3}
-                                 :asdfasdfasf {:asdfasdfasdf 3}}}
-                   {:comments {:c {:key (CommentPointer. "is missing yep ") 
-                                   ; :value (CommentPointer. "is missing yep ") 
-                                   :skip-value true
-                                   ;:key-comment-colors   [:green]
-                                   
-                                   ;:value-comment-colors [:magenta]
-                                   ;; key-colors will be ignored when value comment exists
-                                   :key-colors       [:green]
-                                   :value-colors     [:red]}}
-                    :abbrev true}))))
-
-  
-
-  )
+(defn annotate-paths [data path-to-annotation-map]
+  (reduce #(annotate-path %1 (first %2) (second %2))
+          data path-to-annotation-map))
 
 (comment
-
   (def test-data
     {:cljsbuild {:assert true
                  :builds [{ :id "example-admin"
@@ -226,66 +185,48 @@ This makes it easier to override pprint functionality for certain types."
                                       :optimizations :none}}]}}
     )
 
+  (cl/with-color-when true
+    (pp/with-pprint-dispatch error-path-dispatch
+      (pp/pprint
+       (annotate-paths test-data
+                      {[:cljsbuild :builds 0 :figwheel]
+                       {:abbrev true
+                        :comments {:compiler {;:value-colors [:red]
+                                              :key-colors [:green]
+                                              :value-colors [:red]
+                                              :comment-colors [:magenta]
+                                              :comment " is missing yep "#_(CommentPointer. )
+                                             }}}})
+       
+       )))
   
-
+  #_(cl/with-color
+    (pp/with-pprint-dispatch error-path-dispatch
+      (pp/pprint {:cljsbuild
+                  {
+                   :builds [{ :id "example"
+                             :source-paths 1 #_["src" #_"dev" #_"tests" #_"../support/src"]
+                             :notify-command ["notify"]
+                             :figwheel (with-meta
+                                         { :websocket-host "localhost"
+                                          :on-jsload      'example.core/fig-reload
+                                          :on-message     'example.core/on-message
+                                        ; :open-urls ["http://localhost:3449/index.html"]
+                                        ; :debug true
+                                          }
+                                         {:comments {:on-jsload
+                                                     {:value-comment-colors [:red]
+                                                      :key-colors [:green]
+                                                      :value (CommentPointer. "hey asdf asdf asdf asdf\n asdf asdf as df as df asd f asd fa sd fa \n sd f asd fa sd f asd f asd fasd fa sdf a sdf asdf a sdf a\n sdf a sdf a sdf")}}})
+                             :compiler { :main 'example.core
+                                        :asset-path "js/out"
+                                        :output-to "resources/public/js/example.js"
+                                        :output-dir "resources/public/js/out"
+                                        :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                        ;; :externs ["foreign/wowza-externs.js"]
+                                        :foreign-libs [{:file "foreign/wowza.js"
+                                                        :provides ["wowzacore"]}]
+                                        ;; :recompile-dependents true
+                                        :optimizations :none}}]}})))
   
   )
-
-
-
-(binding [;pp/*print-right-margin* 80
-          ;*print-level* 8
-          ]
-  
-  (cl/with-color
-    (pp/with-pprint-dispatch error-path-dispatch
-    (pp/pprint {:cljsbuild {
-                            :builds [{ :id "example"
-                                      :source-paths 1 #_["src" #_"dev" #_"tests" #_"../support/src"]
-                                      :notify-command ["notify"]
-                                      :figwheel (with-meta
-                                                  { :websocket-host "localhost"
-                                                   :on-jsload      'example.core/fig-reload
-                                                   :on-message     'example.core/on-message
-                                        ; :open-urls ["http://localhost:3449/index.html"]
-                                        ; :debug true
-                                                   }
-                                                  {:comments {:on-jsload
-                                                              {:value-comment-colors [:red]
-                                                               :key-colors [:green]
-                                                               :value (CommentPointer. "hey asdf asdf asdf asdf\n asdf asdf as df as df asd f asd fa sd fa \n sd f asd fa sd f asd f asd fasd fa sdf a sdf asdf a sdf a\n sdf a sdf a sdf")}}})
-                                      :compiler { :main 'example.core
-                                                 :asset-path "js/out"
-                                                 :output-to "resources/public/js/example.js"
-                                                 :output-dir "resources/public/js/out"
-                                                 :libs ["libs_src" "libs_sscr/tweaky.js"]
-                                                 ;; :externs ["foreign/wowza-externs.js"]
-                                                 :foreign-libs [{:file "foreign/wowza.js"
-                                                                 :provides ["wowzacore"]}]
-                                                 ;; :recompile-dependents true
-                                                 :optimizations :none}}]}}))))
-
-#_(binding [*print-level* 4]
-  (pp/pprint {:cljsbuild {
-                          :builds [{ :id "example"
-                                    :source-paths 1 #_["src" #_"dev" #_"tests" #_"../support/src"]
-                                    :notify-command ["notify"]
-                                    :figwheel (with-meta
-                                                { :websocket-host "localhost"
-                                                 :on-jsload      'example.core/fig-reload
-                                                 :on-message     'example.core/on-message
-                                        ; :open-urls ["http://localhost:3449/index.html"]
-                                        ; :debug true
-                                                 }
-                                                {:comments {:on-jsload
-                                                            {:value (CommentPointer. "^--- hey")}}})
-                                    :compiler { :main 'example.core
-                                               :asset-path "js/out"
-                                               :output-to "resources/public/js/example.js"
-                                               :output-dir "resources/public/js/out"
-                                               :libs ["libs_src" "libs_sscr/tweaky.js"]
-                                               ;; :externs ["foreign/wowza-externs.js"]
-                                               :foreign-libs [{:file "foreign/wowza.js"
-                                                               :provides ["wowzacore"]}]
-                                                 ;; :recompile-dependents true
-                                               :optimizations :none}}]}}))
