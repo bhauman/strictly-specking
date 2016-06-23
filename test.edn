@@ -1,0 +1,59 @@
+;; this is a comment in my file
+
+   {  :cljsbuild {:assert true
+                 :builds [{ :id "example-admin"
+                           :source-paths ["src" "dev" "tests" "../support/src"]
+                           :notify-command ["notify"]
+                           :figwheel
+                           { :websocket-host "localhost"
+                            :compiler { :main 'example.core
+                                       :asset-path "js/out"
+                                       :libsers ["libs_src" "libs_sscr/tweaky.js"]
+                                      :output-to "resources/public/js/example.js"
+                                      :output-dir "resources/public/js/out"
+                                      :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                      ;; :externs ["foreign/wowza-externs.js"]
+                                      :foreign-libs [{:file "foreign/wowza.js"
+                                                      :provides ["wowzacore"]}]
+                                      ;; :recompile-dependents true
+                                      :optimizations :none}
+                            :on-jsload      'example.core/fig-reload
+                            :on-message     'example.core/on-message
+                            :open-urls ["http://localhost:3449/index.html"
+                                        "http://localhost:3449/index.html"
+                                        "http://localhost:3449/index.html"
+                                        "http://localhost:3449/index.html"
+                                        "http://localhost:3449/index.html"]
+                            :debug true
+                            }
+
+                           :compiler { :main 'example.core
+                                      :asset-path "js/out"
+                                      :output-to "resources/public/js/example.js"
+                                      :output-dir "resources/public/js/out"
+                                      :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                      ;; :externs ["foreign/wowza-externs.js"]
+                                      :foreign-libs [{:file "foreign/wowza.js"
+                                                      :provides ["wowzacore"]}]
+                                      ;; :recompile-dependents true
+                                      :optimizations :none}}
+                          { :id "example"
+                           :source-paths ["src" "dev" "tests" "../support/src"]
+                           :notify-command ["notify"]
+                           :figwheel
+                           { :websocket-host "localhost"
+                            :on-jsload      'example.core/fig-reload
+                                        :on-message     'example.core/on-message
+                            :open-urls ["http://localhost:3449/index.html"]
+                            :debug true
+                            }
+                           :compiler { :main 'example.core
+                                      :asset-path "js/out"
+                                      :output-to "resources/public/js/example.js"
+                                      :output-dir "resources/public/js/out"
+                                      :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                      ;; :externs ["foreign/wowza-externs.js"]
+                                      :foreign-libs [{:file "foreign/wowza.js"
+                                                      :provides ["wowzacore"]}]
+                                      ;; :recompile-dependents true
+                                      :optimizations :none}}]}}

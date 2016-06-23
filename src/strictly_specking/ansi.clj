@@ -1,6 +1,8 @@
 (ns strictly-specking.ansi
   (:require [clojure.string :as str]))
 
+;; TODO move to using clansi
+
 ;; this is stolen from puget as up to date ansi lib is not really available
 ;; https://github.com/greglook/puget/blob/develop/src/puget/color/ansi.clj
 

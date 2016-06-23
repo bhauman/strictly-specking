@@ -6,10 +6,25 @@
    [clojure.spec :as s]))
 
 #_(s/explain :fig-opt/builds [{:compiler 1
-                                    :id 1
-                                    :source-paths 2}])
+                               :id 1
+                               :source-paths 2}])
+
+;; TODO make knobs for strict-keys conform
+;; strictly-specking.core/*strict-keys-behavior* true, falsey, or {:spelling true :replacement true :only-warn false}
+
 ;; similar key implementation
 ;; this can be improved based on the size of the word
+;; TODO improve this by looking at the implementation in type_check.clj
+;; TODO perhaps steal the algorithm in clojurescript
+
+;; TODO fuzzy-conform-helper may not need to be a part of the strict keys spec object and it could be made
+;; stronger by using the new spec/describe traversing code (ie we can get all the keys for any given spec now)
+
+;; TODO memoization of fuzzy-conform-helper on a per call basis
+;; TODO extract the find key path behavior into its own file
+;; TODO extract strict-keys into its own file
+
+
 
 (defn- next-row
   [previous current other-seq]
@@ -736,132 +751,11 @@
 
 ;; start on using pprint to print contextual errors
 
-(defn use-method
-  "Installs a function as a new method of multimethod associated with dispatch-value. "
-  [^clojure.lang.MultiFn multifn dispatch-val func]
-  (. multifn addMethod dispatch-val func))
-
-(defn into-multimethod
-  "Copies all of the methods from a source multimethod into the target multimethod.
-This makes it easier to override pprint functionality for certain types."
-  [target source]
-  {:pre [(= clojure.lang.MultiFn (class target))
-         (= clojure.lang.MultiFn (class source))]}
-  (doseq [[dispatch-val func] (.getMethodTable ^clojure.lang.MultiFn source)]
-    (use-method target dispatch-val func))
-  target)
-
-(defmulti error-path-dispatch
-  "The pretty print dispatch function for printing paths to errors in maps"
-  class)
-
-(defrecord CommentPointer [text])
-
-(into-multimethod error-path-dispatch pp/simple-dispatch)
-
-(defn pprint-map-with-pointer [amap]
-  (let [comments (or (-> amap meta :comments) {})
-        comments? (not-empty comments)]
-    
-    (.write ^java.io.Writer *out* "{")
-    (pp/pprint-indent :block 2)
-    #_(pp/pprint-newline (if comments?
-                         :linear :linear))
-    (pp/pprint-logical-block
-     (pp/print-length-loop
-      [aseq (seq amap)]
-      (when-let [[k v] (first aseq)]
-
-        (pp/pprint-logical-block 
-         (pp/write-out k)
-         (.write ^java.io.Writer *out* " ")
-         (pp/pprint-newline :linear)
-         ;; (set! pp/*current-length* 0)     ; always print both parts of the [k v] pair
-         (if-let [val-comment (-> comments k :value)]
-           (pp/pprint-logical-block
-            (pp/pprint-logical-block
-             (pp/write-out v))
-            (pp/pprint-newline :mandatory)
-            (pp/write-out val-comment)
-            #_(pp/pprint-newline :mandatory))
-           (pp/write-out v)))
-        (if-let [key-comment (-> comments k :key)]
-          (do
-            (pp/pprint-newline :mandatory)
-            (pp/write-out key-comment)
-            (pp/pprint-newline :mandatory))
-          (when (next aseq)
-            (.write ^java.io.Writer *out* " ")
-            (pp/pprint-newline (if comments?
-                                 :mandatory :linear))))
-        (if (next aseq)
-          (recur (next aseq))
-          (do
-            (.write ^java.io.Writer *out* "}")
-            #_(pp/pprint-newline :linear))
-          ))))))
-
-(defn pprint-comment-pointer [comm-point]
-  (pp/pprint-logical-block 
-   (pp/print-length-loop
-    [aseq (map symbol (string/split (:text comm-point) #"\n"))]
-    (pp/write-out (first aseq))
-    (pp/pprint-newline :linear)
-    (if (next aseq)
-      (recur (next aseq))
-      #_(pp/pprint-newline :mandatory)))))
-
-(do
-  (use-method error-path-dispatch clojure.lang.IPersistentMap pprint-map-with-pointer)
-  (use-method error-path-dispatch CommentPointer pprint-comment-pointer)
-  
-  (pp/with-pprint-dispatch error-path-dispatch
-    (pp/pprint (with-meta {:a 1 :b 2 :c 3
-                           :d {:asdfasdfasfd {:asdfasdfasdf 3}
-                               :asdfasdfasf {:asdfasdfasdf 3}}}
-                 {:comments {:c {:key (CommentPointer. "^--- is missing yep ")
-                                 :value (CommentPointer. "^--- is missing yep ")
-                                 :skip-value true
-                                 :key-color :bold
-                                 :value-color :red}}
-                  :color :none})))
-
-  (pp/with-pprint-dispatch error-path-dispatch
-    (pp/pprint {:cljsbuild {
-                             :builds [{ :id "example"
-                                       :source-paths 1 #_["src" #_"dev" #_"tests" #_"../support/src"]
-                                       :notify-command ["notify"]
-                                       :figwheel (with-meta
-                                                   { :websocket-host "localhost"
-                                                    :on-jsload      'example.core/fig-reload
-                                                    :on-message     'example.core/on-message
-                                        ; :open-urls ["http://localhost:3449/index.html"]
-                                        ; :debug true
-                                                    }
-                                                   {:comments {:on-jsload
-                                                               {:value (CommentPointer. "^--- hey")}}})
-                         :compiler { :main 'example.core
-                                     :asset-path "js/out"
-                                     :output-to "resources/public/js/example.js"
-                                     :output-dir "resources/public/js/out"
-                                     :libs ["libs_src" "libs_sscr/tweaky.js"]
-                                     ;; :externs ["foreign/wowza-externs.js"]
-                                     :foreign-libs [{:file "foreign/wowza.js"
-                                                     :provides ["wowzacore"]}]
-                                     ;; :recompile-dependents true
-                                     :optimizations :none}}]}}))
-
-  
-  )
-
-
-
-
-
-
+;; pprint is in annotated-pprint.clj
 
 ;; create an extra error message addendum
-;;   
+
+;; contextual printing is in print-context.clj
 
 ;; create some functionality to add code context to errors if the
 ;;   source-file(s) is known sjacket can be useful here
@@ -886,13 +780,13 @@ This makes it easier to override pprint functionality for certain types."
 
 ;; docs on keys
 ;;   create a macro that stores docs on namespaced keys
+;;   this can should be added to metadata in the registry on strictly-specking/docs etc
 
 ;; deeper error explain
 ;;   hang a method off of a keyword
 ;;   it takes an error, the complete data structure, a path to the key
 ;;   and gives a more detailed explaination of why that value is the wrong value
 ;;   this will hook into the main message error printing
-
 
 ;; explain
 ;;   create a macro that stores a method on a ns/key

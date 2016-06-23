@@ -4,6 +4,13 @@
    [clojure.pprint :as pp]
    [clojure.string :as string]))
 
+;; this is a library that allows you to print annotated EDN
+
+;; TODO ensure that this works for set paths
+;; TODO this can be improved to handle any general datastructure
+;; TODO make this ClojureScript compatible
+;; this will facilitate great runtime error reporting for Spec in Clojure and ClojureScript
+
 (defn use-method
   "Installs a function as a new method of multimethod associated with dispatch-value. "
   [^clojure.lang.MultiFn multifn dispatch-val func]

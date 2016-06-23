@@ -6,6 +6,11 @@
    [net.cgrand.sjacket :as sj]
    [net.cgrand.sjacket.parser :as p]))
 
+;; TODO look at clojure.core/format
+;; TODO clean up printing the comment (divide it in to different lines)
+;; TODO make this work for paths with sets on them
+;; TODO make it general and possible to point to any structure on a path
+
 (defn- at-newline? [loc]
   (= :newline (:tag (zip/node loc))))
 
