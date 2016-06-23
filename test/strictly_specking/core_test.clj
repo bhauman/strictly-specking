@@ -1,4 +1,4 @@
-(ns specly.core-test
+(ns strictly-specking.core-test
   (:require [clojure.test :refer :all]
             [specly.core :refer :all :as sp]
             [clojure.spec :as s]))
@@ -187,7 +187,3 @@
                  {:ky-spec :specly.core-test/attic, :ky :attic}
                  {:ky-spec :specly.core-test/bedroom, :ky :bedroom})}))
   )
-
-
-
-
