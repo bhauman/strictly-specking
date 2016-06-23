@@ -1,8 +1,10 @@
 (ns strictly-specking.annotated-pprint
   (:require
-   [strictly-specking.ansi :as cl]
+   [strictly-specking.ansi-util :as ansi-util]
    [clojure.pprint :as pp]
    [clojure.string :as string]))
+
+#_(remove-ns 'strictly-specking.annotated-pprint)
 
 ;; this is a library that allows you to print annotated EDN
 
@@ -39,9 +41,9 @@ This makes it easier to override pprint functionality for certain types."
              (and
               (sequential? colors)
               (not-empty colors)
-              (every? cl/sgr colors)))]}
+              (every? ansi-util/ansi-code? colors)))]}
   (if colors
-    (cl/print-color-text
+    (ansi-util/print-color-text
      colors
      (pp/write-out obj))
     (pp/write-out obj)))
@@ -192,7 +194,7 @@ This makes it easier to override pprint functionality for certain types."
                                       :optimizations :none}}]}}
     )
 
-  (cl/with-color-when true
+  (ansi-util/with-ansi-when true
     (pp/with-pprint-dispatch error-path-dispatch
       (pp/pprint
        (annotate-paths test-data
@@ -207,7 +209,7 @@ This makes it easier to override pprint functionality for certain types."
        
        )))
   
-  #_(cl/with-color
+  #_(cl/with-ansi-when true
     (pp/with-pprint-dispatch error-path-dispatch
       (pp/pprint {:cljsbuild
                   {
