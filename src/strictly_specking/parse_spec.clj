@@ -1,7 +1,7 @@
 (ns strictly-specking.parse-spec
   (:require
    [clojure.set :as set]
-   [clojure.spec :as spec]))
+   [clojure.spec :as s]))
 
   ;; we are dealing with a datatype
   ;; a list of paths Monoid
@@ -16,7 +16,10 @@
   ;; we need to cons a value to the head of each of the lists
   ;; map-cons v list-of-paths 
 
-  ;;
+;;
+
+(defn spec-from-registry [spec-key]
+  (get (s/registry) spec-key))
 
 (defn parse-keys-args [& {:keys [req opt req-un opt-un]}]
   (let [spec-specs  (into (vec req) opt)
@@ -26,6 +29,9 @@
     {:keys->specs keys->specs
      :k->s        #(or (keys->specs %) %)
      :known-keys  (set known-keys)}))
+
+
+(declare poss-path)
 
 (def empty-path-set #{})
 (def consable-empty-path-set #{[]})
@@ -73,9 +79,9 @@
              (s/regex? spec)))
       (s/regex? desc)))
 
-(def int-key {:ky ::int-key})
+(def int-key {:ky :strictly-specking.core/int-key})
 
-(def int-key? #(= ::int-key (:ky %)))
+(def int-key? #(= :strictly-specking.core/int-key (:ky %)))
 
 (defn regex-poss-path [f desc]
   (let [path-set (poss-path f desc)]

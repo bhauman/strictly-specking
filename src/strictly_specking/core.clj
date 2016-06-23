@@ -1,11 +1,11 @@
 (ns strictly-specking.core
   (:require
    [strictly-specking.parse-spec]
+   [strictly-specking.strict-keys :as strict-impl]
    [clojure.pprint :as pp]
    [clojure.string :as string]
    [clojure.set :as set]
    [clojure.spec :as s]))
-
 
 (comment
   (do
@@ -71,7 +71,8 @@
   [& args]
   ;; check the args with s/keys
   (let [form (macroexpand `(s/keys ~@args))]
-    `(strict-mapkeys-impl (strictly-specking.parse-spec/parse-keys-args ~@args) ~form)))
+    `(strictly-specking.strict-keys/strict-mapkeys-impl
+      (strictly-specking.parse-spec/parse-keys-args ~@args) ~form)))
 
 
 

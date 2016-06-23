@@ -1,6 +1,6 @@
 (ns strictly-specking.strict-keys
   (:require
-   [strictly-specking.parse-spec :refer [parse-keys-args]]
+   [strictly-specking.parse-spec :refer [parse-keys-args spec-from-registry]]
    [clojure.string :as string]
    [clojure.set :as set]
    [clojure.spec :as s]))
@@ -64,14 +64,9 @@
 (defprotocol FuzzySpec
   (fuzzy-conform-score [_ x]))
 
-(defn spec-from-registry [spec-key]
-  (get (s/registry) spec-key))
-
 (defn fuzzy-spec? [spec-key]
   (when-let [s (and spec-key (spec-from-registry spec-key))]
        (satisfies? FuzzySpec s)))
-
-(declare parse-keys-args poss-path)
 
 ;; score a spelling suggestion
 ;;  + 1 the value is a collection and conforms
@@ -369,17 +364,17 @@
                               [(conj pred-path :misspelled-key unknown-key)
                                (-> exp-data
                                  (assoc 
-                                  ::misspelled-key unknown-key
-                                  ::correct-key suggest))]
+                                  :strictly-specking.core/misspelled-key unknown-key
+                                  :strictly-specking.core/correct-key suggest))]
                               (if-let [replace-suggest (replacement-suggestion spec-key-data x unknown-key)]
                                 [(conj pred-path :wrong-key unknown-key)
                                  (-> exp-data
                                      (assoc 
-                                      ::wrong-key unknown-key
-                                      ::correct-key replace-suggest))]
+                                      :strictly-specking.core/wrong-key unknown-key
+                                      :strictly-specking.core/correct-key replace-suggest))]
                                 [(conj pred-path :unknown-key unknown-key)
                                  (-> exp-data
-                                     (assoc ::unknown-key unknown-key))])))))))
+                                     (assoc :strictly-specking.core/unknown-key unknown-key))])))))))
             ))))
       ;; These can be improved
       (gen* [_ a b c]

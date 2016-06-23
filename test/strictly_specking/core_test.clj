@@ -1,6 +1,7 @@
 (ns strictly-specking.core-test
   (:require [clojure.test :refer :all]
-            [specly.core :refer :all :as sp]
+            [strictly-specking.core :refer :all :as sp]
+            [strictly-specking.parse-spec :as parse]
             [clojure.spec :as s]))
 
 (s/def ::id (s/or :string string? :keyword keyword?))
@@ -10,13 +11,11 @@
                                             ::id
                                             ::source-paths]
                                    :opt-un [::assert]))
-
     
 (s/def ::http-server-root string?)
 (s/def ::server-port      integer?)
 (s/def ::server-ip        string?)
 (s/def ::builds           (s/* ::build-config))
-    
     
 (s/def ::figwheel (strict-keys
                    :opt-un [::http-server-root
@@ -139,17 +138,17 @@
                              :opt [::c ::d]))
          '(keys
            :opt
-           [:specly.core-test/c :specly.core-test/d]
+           [::c ::d]
            :opt-un
-           [:specly.core-test/a :specly.core-test/b])))
+           [::a ::b])))
 
   (is (= (s/describe (strict-keys :opt-un [::a ::b]
                                   :opt [::c ::d]))
          '(strict-keys
            :opt
-           [:specly.core-test/c :specly.core-test/d]
+           [::c ::d]
            :opt-un
-           [:specly.core-test/a :specly.core-test/b])))
+           [::a ::b])))
 
   (is (= (s/describe (s/map-of keyword? even?))
          '(and (coll-of (tuple keyword? even?) {}) map?)))
@@ -176,14 +175,14 @@
   )
 
 (deftest pathfinding
-  (is (= (sp/find-key-path ::root ::bedroom)
-         #{(list {:ky-spec :specly.core-test/cljsbuild, :ky :cljsbuild}
-                 {:ky-spec :specly.core-test/houses, :ky :houses}
-                 {:ky :specly.core/int-key}
-                 {:ky-spec :specly.core-test/bedroom, :ky :bedroom})
-           (list {:ky-spec :specly.core-test/cljsbuild, :ky :cljsbuild}
-                 {:ky-spec :specly.core-test/houses, :ky :houses}
-                 {:ky :specly.core/int-key}
-                 {:ky-spec :specly.core-test/attic, :ky :attic}
-                 {:ky-spec :specly.core-test/bedroom, :ky :bedroom})}))
+  (is (= (parse/find-key-path ::root ::bedroom)
+         #{(list {:ky-spec ::cljsbuild, :ky :cljsbuild}
+                 {:ky-spec ::houses, :ky :houses}
+                 {:ky :strictly-specking.core/int-key}
+                 {:ky-spec ::bedroom, :ky :bedroom})
+           (list {:ky-spec ::cljsbuild, :ky :cljsbuild}
+                 {:ky-spec ::houses, :ky :houses}
+                 {:ky :strictly-specking.core/int-key}                 
+                 {:ky-spec ::attic, :ky :attic}
+                 {:ky-spec ::bedroom, :ky :bedroom})}))
   )
