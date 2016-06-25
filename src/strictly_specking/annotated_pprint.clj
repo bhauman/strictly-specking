@@ -191,21 +191,21 @@ This makes it easier to override pprint functionality for certain types."
   (reduce #(annotate-path %1 (first %2) (second %2))
           data path-to-annotation-map))
 
-(ansi-util/with-ansi-when true
+#_(ansi-util/with-ansi-when true
     (pp/with-pprint-dispatch error-path-dispatch
       (pp/pprint
        (annotate-path-only test-data
-                           [:cljsbuild :builds 0 #_:source-paths-set]
+                           [:cljsbuild :builds 0 :source-paths-set]
                            {:abbrev true
-                            :comments {:source-paths {
+                            :comments {"src" {
                                           :key-colors [:green]
-                                          :value-colors [:red]
+                                          :value-colors [:bright]
                                           :comment-colors [:magenta]
                                           :comment " is screwwed"
                                           }
-                                       #_"tests" #_{
+                                       "tests" {
                                           :key-colors [:green]
-                                          :value-colors [:red]
+                                          :value-colors [:bright]
                                           :comment-colors [:magenta]
                                           :comment " is screwwed"
                                           }}}))))
