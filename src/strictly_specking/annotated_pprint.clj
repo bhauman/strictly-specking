@@ -198,8 +198,8 @@ This makes it easier to override pprint functionality for certain types."
                            [:cljsbuild :builds 0 :source-paths-set]
                            {:abbrev true
                             :comments {"src" {
-                                          :key-colors [:green]
-                                          :value-colors [:bright]
+                                          :key-colors     [:green]
+                                          :value-colors   [:bright]
                                           :comment-colors [:magenta]
                                           :comment " is screwwed"
                                           }
@@ -207,7 +207,7 @@ This makes it easier to override pprint functionality for certain types."
                                           :key-colors [:green]
                                           :value-colors [:bright]
                                           :comment-colors [:magenta]
-                                          :comment " is screwwed"
+                                          :comment "is screwwed\n asdf  as df asdfads"
                                           }}}))))
 
 (comment
@@ -283,7 +283,7 @@ This makes it easier to override pprint functionality for certain types."
                                               :key-colors [:green]
                                               :value-colors [:red]
                                               :comment-colors [:magenta]
-                                              :comment " is missing yep "#_(CommentPointer. )
+                                              :comment " is missing yep\n asdf asd f asdf asdf asdf "#_(CommentPointer. )
                                              }}}})
        
        )))
