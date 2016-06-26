@@ -111,6 +111,7 @@ This makes it easier to override pprint functionality for certain types."
 
 (defn pprint-seq-with-pointer [pre suf avec comment-key-fn]
   (let [comments (or (-> avec meta :comments) {})
+        abbrev   (-> avec meta :comments)
         comments? (not-empty comments)]
     ;;abbrev print-length can be 3 + max key
     (pp/pprint-logical-block
@@ -119,31 +120,50 @@ This makes it easier to override pprint functionality for certain types."
       [aseq (seq avec)
        c    0]
       (when aseq
-        (if-let [{:keys [comment value-colors comment-colors]
-                  :as current-comment} (get comments (comment-key-fn (first aseq) c))]
-          (do
-            (print-colored value-colors (first aseq))
-            (pp/pprint-newline :mandatory)
-            (print-colored comment-colors (CommentPointer. comment))
-            #_(pp/pprint-newline :mandatory))
-          (pp/write-out (first aseq)))
-        (when (next aseq)
-          (.write ^java.io.Writer *out* " ")
-          (pp/pprint-newline :linear)
-          (recur (next aseq) (inc c))))))))
+        (let [v (first aseq)
+              v (if (and abbrev (coll? v))
+                  (vary-meta v assoc :abbrev :tight)
+                  v)]
+          (if-let [{:keys [comment value-colors comment-colors]
+                    :as current-comment} (get comments (comment-key-fn v c))]
+            (do
+              (print-colored value-colors v)
+              (pp/pprint-newline :mandatory)
+              (print-colored comment-colors (CommentPointer. comment))
+              #_(pp/pprint-newline :mandatory))
+            (pp/write-out v))
+          (when (next aseq)
+            (.write ^java.io.Writer *out* " ")
+            (pp/pprint-newline :linear)
+            (recur (next aseq) (inc c)))))))))
+
+(defn abbrev-seq-with-pointer [pre suf a-seq comment-key-fn]
+  (if-let [abr-level (-> a-seq meta :abbrev)]
+    (let [maxk   (or
+                  (when-let [comments (not-empty (-> a-seq meta :comments))]
+                    (and (every? integer? (keys comments))
+                         (reduce max (keys comments))))
+                  0)
+          length (if (= :tight abr-level) (+ maxk 2) (+ maxk 4))
+          level  (if (= :tight abr-level) 2 3)]
+      (binding [*print-level* (+ level
+                                 (or @(resolve 'clojure.pprint/*current-level*) 0))
+                *print-length* length]
+        (pprint-seq-with-pointer pre suf a-seq comment-key-fn)))
+    (pprint-seq-with-pointer pre suf a-seq comment-key-fn)))
 
 (defn pprint-vector-with-pointer [avec]
   (if (-> avec meta :comments)
-    (pprint-seq-with-pointer "[" "]" avec (fn [_ c] c))
+    (abbrev-seq-with-pointer "[" "]" avec (fn [_ c] c))
     (orig-pprint-vector avec)))
 
 (defn pprint-set-with-pointer [a-set]
   (if (-> a-set meta :comments)
-    (pprint-seq-with-pointer "#{" "}" a-set (fn [_ c] c))
+    (abbrev-seq-with-pointer "#{" "}" a-set (fn [_ c] c))
     (orig-pprint-set a-set)))
 
 (defn pprint-simple-list-with-pointer [alis]
-  (pprint-seq-with-pointer "(" ")" alis (fn [_ c] c)))
+  (abbrev-seq-with-pointer "(" ")" alis (fn [_ c] c)))
 
 (defn pprint-list-with-pointer [aseq]
   (if (-> aseq meta :comments)
@@ -194,15 +214,15 @@ This makes it easier to override pprint functionality for certain types."
     (pp/with-pprint-dispatch error-path-dispatch
       (pp/pprint
        (annotate-path-only test-data
-                           [:cljsbuild :builds 0 :source-paths-set]
+                           [:cljsbuild :builds 0 :source-paths]
                            {:abbrev true
-                            :comments {"src" {
+                            :comments {0 {
                                               :key-colors     [:green]
                                               :value-colors   [:bright]
                                               :comment-colors [:magenta]
                                               :comment " is screwwed"
                                               }
-                                       "tests" {
+                                       10 {
                                                 :key-colors [:green]
                                                 :value-colors [:bright]
                                                 :comment-colors [:magenta]
@@ -213,7 +233,31 @@ This makes it easier to override pprint functionality for certain types."
   (def test-data
     {:cljsbuild {:assert true
                  :builds [{ :id "example-admin"
-                           :source-paths ["src" "dev" "tests" "../support/src"]
+                           :source-paths ["src" "dev" "tests" "../support/src"
+                                          "src" "dev" "tests" "../support/src"
+                                          { :websocket-host "localhost"
+                            :compiler { :main 'example.core
+                                       :asset-path "js/out"
+                                       :libsers ["libs_src" "libs_sscr/tweaky.js"]
+                                      :output-to "resources/public/js/example.js"
+                                      :output-dir "resources/public/js/out"
+                                      :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                      ;; :externs ["foreign/wowza-externs.js"]
+                                      :foreign-libs [{:file "foreign/wowza.js"
+                                                      :provides ["wowzacore"]}]
+                                      ;; :recompile-dependents true
+                                      :optimizations :none}
+                            :on-jsload      'example.core/fig-reload
+                            :on-message     'example.core/on-message
+                            :open-urls ["http://localhost:3449/index.html"
+                                        "http://localhost:3449/index.html"
+                                        "http://localhost:3449/index.html"
+                                        "http://localhost:3449/index.html"
+                                        "http://localhost:3449/index.html"]
+                            :debug true
+                            } "dev" "tests" "../support/src"
+                                          "src" "dev" "tests" "../support/src"
+                                          "src" "dev" "tests" "../support/src"]
                            :source-paths-list '("src" "dev" "tests" "../support/src")
                            :source-paths-set #{"src" "dev" "tests" "../support/src"}
                            :notify-command ["notify"]
