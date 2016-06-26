@@ -2,6 +2,9 @@
   (:require
    [strictly-specking.parse-spec]
    [strictly-specking.strict-keys :as strict-impl]
+   [strictly-specking.ansi-util :as cl :refer [color]]
+   [strictly-specking.annotated-pprint :as annot]
+   [clansi.core :refer [with-ansi]]
    [clojure.pprint :as pp]
    [clojure.string :as string]
    [clojure.set :as set]
@@ -82,15 +85,6 @@
     `(strictly-specking.strict-keys/strict-mapkeys-impl
       (strictly-specking.parse-spec/parse-keys-args ~@args) ~form)))
 
-
-
-
-
-
-
-
-
-
 ;; * moving from errors to messages
 
 ;; ** filtering errors
@@ -105,6 +99,8 @@
                                                   :id 1
                                                   :source-path 2
                                                   }]))
+
+;; *** detect missing-keys 
 
 (defn missing-keys [error]
   (when (and (sequential? (:pred error))
@@ -121,6 +117,9 @@
                  :via [:fig-opt/builds :fig-opt/builds :fig-opt/build-config :fig-opt/build-config],
                  :in [0]})
 
+;; *** mark errors with a type
+
+
 (defn error-type [error]
   (cond
     (error ::unknown-key)      ::unknown-key
@@ -134,10 +133,14 @@
 (defn add-error-type [error]
   (assoc error ::error-type (error-type error)))
 
+;; *** parse out and added missing keys data on error
+
 (defn add-required-keys [error]
   (if-let [missing-required-keys (missing-keys error)]
     (assoc error ::missing-keys (missing-keys error))
     error))
+
+;; *** apply initial data transforms on errors 
 
 (defn filter-errors [problems]
   (->> problems
@@ -145,6 +148,8 @@
        (map add-required-keys)
        (map add-error-type)))
 
+
+;; *** combine errors for single location
 ;; Sometimes there are multiple errors on the same path location
 
 (defn combined-or-pred [errors]
@@ -189,6 +194,14 @@
       fixed-errs)
     errors))
 
+(defn prepare-errors [explain-data validated-data]
+  (->> explain-data
+       ::s/problems
+       filter-errors
+       (map #(assoc % ::root-data validated-data))
+       sort-errors
+       combined-or-pred
+       corrections-overide-missing-required))
 
 #_(->> terrors
       ::s/problems
@@ -224,7 +237,6 @@
 ;; this will provide a more meaningful description of whats gone wrong
 ;; will delegete to a ns/key based error message if available
 
-;; temporary copy from spec until public fns make it into api
 ;; *** TODO this needs to be refined to the default error
 ;; must keep in mind that the error is going to be displayed below
 (defn message-default-str
@@ -259,10 +271,15 @@
 
 (def type-lookup->str (some-fn symbol-type-table pr-str))
 
+(defn resovlable-predicate? [x]
+  (or (symbol-type-table x)
+   (and
+    (sequential? x)
+    (= 1 (count x))
+    (symbol-type-table (first x)))))
+
 (defn pred-symbol->str [x]
-  (if-let [res (and (sequential? x)
-                    (= 1 (count x))
-                    (symbol-type-table (first x)))]
+  (if-let [res (resovlable-predicate? x)]
     res
     (type-lookup->str x)))
 
@@ -272,20 +289,36 @@
 (defn format-predicate-str [{:keys [pred val]}]
   (cond
     (seq-with-first 'or pred)
-    (str "It should satisfy one of: "  (string/join " | " (map (some-fn symbol-type-table str) (rest pred))))
+    (str (if (every? symbol-type-table (rest pred))
+           "It should be one of: "
+           "It should satisfy one of: ")
+         (string/join " | "
+                      (map #(color % :good-pred)
+                           (map (some-fn symbol-type-table str) (rest pred)))))
     (seq-with-first '+ pred)
-    (str "It should be a non-empty sequence of: " (pred-symbol->str (rest pred)))
+    (str "It should be a non-empty sequence of: " (color
+                                                   (pred-symbol->str (rest pred))
+                                                   :good-pred))
     (seq-with-first '* pred)
-    (str "It should be a sequence of: " (pred-symbol->str (rest pred)))    
+    (str "It should be a sequence of: " (color (pred-symbol->str (rest pred)) :good-pred))
     :else
-    (str "It should satisfy "          (pred-symbol->str pred))))
+    (str (if (resovlable-predicate? pred)
+           "It should be a "
+           "It should satisfy ")
+         (color (pred-symbol->str pred) :good-pred))))
 
-(defn format-seq-with-and [s]
-  (let [f (pr-str (first s))]
+(defn format-seq-with-end [s end]
+  (let [f (color (pr-str (first s)) :focus-key)]
     (condp = (count s)
       1 f
-      2 (str f " and " (pr-str (second s)))
-      3 (str f ", " (format-seq-with-and (rest s))))))
+      2 (str f " " end " "(color (pr-str (second s)) :focus-key))
+      (str f ", " (format-seq-with-end (rest s) end)))))
+
+(defn format-seq-with-and [s]
+  (format-seq-with-end s 'and))
+
+(defn format-seq-with-or [s]
+  (format-seq-with-end s 'or))
 
 (defn format-summarized-value [v]
   (string/trim-newline
@@ -294,71 +327,209 @@
                *print-level* 2]
        (pp/pprint v)))))
 
+;; *** TODO figure out how to identify where to point to
+
+;; might not need this yet
+
+(defn parent [e]
+  (get-in (::root-data e) (butlast (:in e))))
+
+(defn current [e]
+  (get-in (::root-data e) (:in e)))
+
+(defn parent-pred [pred]
+  #(pred (parent %)))
+
+(def parent-sequence? (parent-pred sequential?))
+(def parent-vector? (parent-pred vector?))
+(def parent-map? (parent-pred map?))
+(def parent-set? (parent-pred set?))
+(def parent-coll? (parent-pred coll?))
+
 (defmulti error-message ::error-type)
 
 (defmethod error-message :default [e]
   (message-default-str e #_(select-keys e [:pred :path :val :reason :via :in])))
 
+(defn parent-type-str [e]
+  (cond
+    (parent-map? e)      "Map"
+    (parent-set? e)      "Set"
+    (parent-vector? e)   "Vector"
+    (parent-sequence? e) "Sequence"))
+
 (defn bad-value-message [{:keys [path pred val reason via in] :as e}]
   (let [k (last in)]
-    (if
-      (and (integer? k)
-           (< 1 (count in)))
-      ;; *** this is very dicey it might be a map in this case, no way to tell right now
-      ;; if we hade the original structure we could test for this
-      ;; also we may have pointers into the sequence structure at some point
-      ;; and then this will be obviated
-      (str "The sequence at key " (second (reverse in)) " has the wrong value "
-           (format-summarized-value val)  " at index " (pr-str k)
-           ". " (format-predicate-str e))
-      (str "The key " (pr-str k) " has the wrong value "
-           (format-summarized-value val) ". " (format-predicate-str e))))
-#_  (pp/pprint e)
-)
+    (cond
+      (parent-map? e)
+      (str "The key " (color (pr-str k) :focus-key)
+           " has the wrong value "
+           (color (format-summarized-value val) :bad-value)
+           ".\n  " (format-predicate-str e))
+      (parent-coll? e)
+      (str "The " (parent-type-str e)
+           " at " (color (pr-str (vec (butlast in))) :focus-path)
+           " contains bad value "
+           (color (format-summarized-value val) :bad-value)
+           ".\n  " (format-predicate-str e))
+      :else
+      (str "The key " (color (pr-str k) :focus-key)
+           " has the wrong value "
+           (color (format-summarized-value val) :bad-value)
+           ".\n  " (format-predicate-str e)))))
 
 (defmethod error-message ::bad-value [e] (bad-value-message e))
 (defmethod error-message ::bad-value-comb-pred [e] (bad-value-message e))
 
 (defmethod error-message ::should-not-be-empty [{:keys [path pred val reason via in] :as e}]
-  (str "The value " (pr-str val) " at key " (last in) " should not be empty. "
+  (str "The value " (color (pr-str val) :bad-value)
+       " at key " (color (last in) :focus-key)
+       " should not be empty.\n  "
        (format-predicate-str (update-in e [:pred] (fn [x] (list '+ x))))))
 
 (defmethod error-message ::unknown-key [{:keys [path pred val reason via in] :as e}]
-  (str "Found unrecognized key " (::unknown-key e) " at path " (pr-str in)))
+  (str "Found unrecognized key " (color (::unknown-key e) :error-key)
+       " at path " (color (pr-str in) :focus-path) "\n"
+       "  Must be one of: " (format-seq-with-or pred)))
 
 (defmethod error-message ::missing-required-keys [{:keys [path pred val reason via in] :as e}]
-  (pp/pprint e)
   (when-let [kys (not-empty (::missing-keys e))]
     (if (< 1 (count kys))
-      (str "Is missing required keys " (format-seq-with-and kys) " at path " (pr-str in))
-      (str "Is missing required key " (format-seq-with-and kys) " at path " (pr-str in)))))
+      (str "Missing required keys " (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path))
+      (str "Missing required key "  (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path)))))
 
 ;; *** TODO ::wrong-key
+;; upon reflection misspelling and wrong keys should have multiple options for correction
+;; we probably should move ::correct-key to ::correct-keys
+;; but the scores of the top choices should be close and in order 
+
+(defmethod error-message ::wrong-key [{:keys [path pred val reason via in] :as e}]
+  (str "The key " (color (::wrong-key e) :error-key)
+       " is unrecognized. Perhaps you meant "
+       (color (::correct-key e) :correct-key)
+       "?"))
 
 ;; *** TODO ::misspelled-key
+;; upon reflection misspelling and wrong keys should have multiple options for correction
+;; we probably should move ::correct-key to ::correct-keys
 
-#_ (def terr (s/explain-data :fig-opt/builds [{:compiler 1
-                                               :id 1
-                                               :asdfasdf [1]
-                                               :cowabunga ["asdf"]
-                                               }]))
+(defmethod error-message ::misspelled-key [{:keys [path pred val reason via in] :as e}]
+  (str "The key " (color (::misspelled-key e) :error-key)
+       " is misspelled. It should probably be "
+       (color (::correct-key e) :correct-key)))
 
-#_(->> terr
-      ::s/problems
-      filter-errors
-      combined-or-pred
-      corrections-overide-missing-required
-      sort-errors
-      (mapv error-message)
-      (map println))
+;; *** TODO: fill in the rest of the error types
+
+(defmulti inline-message ::error-type)
+
+(defmethod inline-message :default [e] (str "The key " (-> e :in last) " has a problem"))
+(defmethod inline-message ::bad-value [e]
+  (str "The key " (-> e :in last) " has a bad value"))
+
+(defmethod inline-message ::bad-value-comb-pred [e]
+  (str "The key " (-> e :in last) " has a bad value"))
+
+(defmethod inline-message ::should-not-be-empty [e]
+  (str "The key " (-> e :in last) " should not be empty"))
+
+(defmethod inline-message ::unknown-key [e]
+  (str "The key " (::unknown-key e) " is unrecognized"))
+
+;; this is interestion I need to add a key
+#_(defmethod inline-message ::missing-required-keys [e]
+  (str "XXXXX "
+       (-> e :in last)
+       " is missing"))
+
+(defmethod inline-message ::wrong-key [e]
+  (str "The key " (-> e ::wrong-key) " should probably be " (::correct-key e)))
+
+(defmethod inline-message ::misspelled-key [e]
+  (str "The key " (-> e ::misspelled-key) " should probably be " (::correct-key e)))
 
 
+;; *** use pprint to print contextual errors
 
+(defn pprint-sparse-path
+  ([data path key-message-map colors]
+   (pp/with-pprint-dispatch annot/error-path-dispatch
+     (pp/pprint
+      (annot/annotate-path-only
+       data
+       path
+       {:abbrev true
+        :comments (into {}
+                        (map (fn [[k message]]
+                               [k
+                                (merge {:key-colors     [:error-key]
+                                        :value-colors   [:reset]
+                                        :comment-colors [:pointer]
+                                        :comment message}
+                                       colors)])
+                             key-message-map))}))))
+  ([data path key-message-map]
+   (pprint-sparse-path data path key-message-map {})))
 
+;; *** pprint inline message
 
-;; TODO: fill in the rest of the error types
+(defmulti pprint-inline-message ::error-type)
 
-;; start on using pprint to print contextual errors
+(defmethod pprint-inline-message :default [e]
+  (pprint-sparse-path (::root-data e) (butlast (:in e))
+                      {(last (:in e)) (inline-message e)}
+                      {:key-colors [:highlight]
+                       :value-colors [:bad-value]}))
+
+(defmethod pprint-inline-message ::unknown-key [e]
+  (pprint-sparse-path (::root-data e) (:in e)
+                      {(::unknown-key e) (inline-message e)}))
+
+(defmethod pprint-inline-message ::misspelled-key [e]
+  (pprint-sparse-path (::root-data e) (:in e)
+                      {(::misspelled-key e) (inline-message e)}))
+
+(defmethod pprint-inline-message ::wrong-key [e]
+  (pprint-sparse-path (::root-data e) (:in e)
+                      {(::wrong-key e) (inline-message e)}))
+
+(defmethod pprint-inline-message ::missing-required-keys [e]
+  (pprint-sparse-path (reduce #(assoc-in %1 (conj (vec (:in e)) %2)
+                                         '...)
+                              (::root-data e)
+                              (::missing-keys e))
+                      (:in e)
+                      (into {}
+                            (map (fn [k]
+                                   [k (str "The required key " (pr-str k) " is missing")]))
+                            (::missing-keys e))))
+
+(defn test-print [error]
+  (println (color "---------------------------------\n" :header))
+  (println (error-message error))
+  (println "\n")
+  ;; could should indent this
+  (pprint-inline-message error)
+  (println "\n")
+  (println (color "---------------------------------\n" :footer))  
+  )
+
+(do
+  (def structer [{:compiler 1
+                :id 1
+                :asdfasdf [1 2]
+                ;:source-paths [""]
+                }])
+
+  (def terr (s/explain-data :fig-opt/builds structer))
+
+  (with-ansi
+    (->> 
+     (prepare-errors terr structer )
+     #_(map pprint-inline-message)
+     (mapv test-print)
+     #_ (mapv error-message)
+     #_ (map println)))
+  )
 
 ;; pprint is in annotated-pprint.clj
 
