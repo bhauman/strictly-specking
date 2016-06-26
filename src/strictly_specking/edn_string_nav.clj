@@ -183,12 +183,13 @@
 #_(->> (file-to-initial-position "project.clj")
        (->root-loc))
 
+;; *** TODO add end line and end column
 (defn get-path-in-clj-file
   "Given the name of a file that holds a collection of EDN data or
    a project.clj file. This function will traverse the given path and
    return a map of the following info:
 
-     :line - the line number where the found item
+     :line   - the line number of the found item
      :column - the column number of the found item
      :value  - the value of the found item
      :path   - the path that was supplied as an argument
