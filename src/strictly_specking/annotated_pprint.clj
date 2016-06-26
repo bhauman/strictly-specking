@@ -40,8 +40,7 @@ This makes it easier to override pprint functionality for certain types."
   {:pre [(or (nil? colors)
              (and
               (sequential? colors)
-              (not-empty colors)
-              (every? ansi-util/ansi-code? colors)))]}
+              (not-empty colors)))]}
   (if colors
     (ansi-util/print-color-text
      colors
@@ -140,7 +139,7 @@ This makes it easier to override pprint functionality for certain types."
 
 (defn pprint-set-with-pointer [a-set]
   (if (-> a-set meta :comments)
-    (pprint-seq-with-pointer "#{" "}" a-set (fn [a _] a))
+    (pprint-seq-with-pointer "#{" "}" a-set (fn [_ c] c))
     (orig-pprint-set a-set)))
 
 (defn pprint-simple-list-with-pointer [alis]
@@ -198,16 +197,16 @@ This makes it easier to override pprint functionality for certain types."
                            [:cljsbuild :builds 0 :source-paths-set]
                            {:abbrev true
                             :comments {"src" {
-                                          :key-colors     [:green]
-                                          :value-colors   [:bright]
-                                          :comment-colors [:magenta]
-                                          :comment " is screwwed"
-                                          }
+                                              :key-colors     [:green]
+                                              :value-colors   [:bright]
+                                              :comment-colors [:magenta]
+                                              :comment " is screwwed"
+                                              }
                                        "tests" {
-                                          :key-colors [:green]
-                                          :value-colors [:bright]
-                                          :comment-colors [:magenta]
-                                          :comment "is screwwed\n asdf  as df asdfads"
+                                                :key-colors [:green]
+                                                :value-colors [:bright]
+                                                :comment-colors [:magenta]
+                                                :comment "is screwwed\n asdf  as df asdfads"
                                           }}}))))
 
 (comment
