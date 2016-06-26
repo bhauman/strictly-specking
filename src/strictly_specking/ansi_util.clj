@@ -24,7 +24,8 @@
    :warning-key [:bright]
    :focus-path  [:magenta]
    :message     [:magenta]
-   :pointer     [:magenta]})
+   :pointer     [:magenta]
+   :none        [:reset]})
 
 (defmacro black-and-white [body]
   (binding [*print-styles* {}]
