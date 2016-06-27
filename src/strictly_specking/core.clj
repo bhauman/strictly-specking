@@ -71,7 +71,7 @@
   
   )
 
-#_ (init-rules)
+#_ (init-test-rules)
 
 ;; * strict-keys macro
 
@@ -618,6 +618,21 @@
      #_ (mapv error-message)
      #_ (map println)))
   )
+
+;; * docs on keys
+;;
+
+;; our own private registry for data on keys
+
+(defonce ^:private registry-ref (atom {}))
+
+(defn def-key-doc [k d]
+  (swap! registry-ref assoc-in [k ::doc] d))
+
+(defn key-doc [k]
+  (get-in @registry-ref [k ::doc]))
+
+
 
 ;; pprint is in annotated-pprint.clj
 
