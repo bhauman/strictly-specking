@@ -4,6 +4,8 @@
    [strictly-specking.strict-keys :as strict-impl]
    [strictly-specking.ansi-util :as cl :refer [color]]
    [strictly-specking.annotated-pprint :as annot]
+   [strictly-specking.edn-string-nav :as edn-string-nav]
+   [strictly-specking.context-print :as cp]
    [clansi.core :refer [with-ansi]]
    [clojure.pprint :as pp]
    [clojure.string :as string]
@@ -194,11 +196,16 @@
       fixed-errs)
     errors))
 
-(defn prepare-errors [explain-data validated-data]
+;; still rough
+;; need a notion of a source ;; pure data vs. file source
+(defn prepare-errors [explain-data validated-data file]
   (->> explain-data
        ::s/problems
        filter-errors
        (map #(assoc % ::root-data validated-data))
+       (map #(if file
+                 (assoc % ::file-source file)
+               %))       
        sort-errors
        combined-or-pred
        corrections-overide-missing-required))
@@ -470,29 +477,54 @@
   ([data path key-message-map]
    (pprint-sparse-path data path key-message-map {})))
 
+;; *** file contextual errors
+
+;; really need to move this towards the same interface as above
+;; if there is a file on the error we will display it in context of the file
+
+(defn pprint-in-file [file base-path key-message-map]
+  (let [[k message] (first key-message-map) 
+        path        (conj (vec base-path) k)]
+    (when-let [{:keys [line column value path loc]}
+               (edn-string-nav/get-path-in-clj-file path file)]
+      (cp/print-message-in-context-of-file file line column message))))
+
+#_(edn-string-nav/get-path-in-clj-file [0] "tester.edn")
+
+(defn pprint-in-context
+  ([e base-path key-message-map]
+   (pprint-in-context e base-path key-message-map {}))
+  ([e base-path key-message-map colors]
+   (if (::file-source e)
+     (pprint-in-file (::file-source e) base-path key-message-map)
+     (pprint-sparse-path (::root-data e) base-path key-message-map colors))))
+
 ;; *** pprint inline message
+;;
+;; this should dispatch and display in file context if there is file
+;; information on the error
 
 (defmulti pprint-inline-message ::error-type)
 
 (defmethod pprint-inline-message :default [e]
-  (pprint-sparse-path (::root-data e) (butlast (:in e))
-                      {(last (:in e)) (inline-message e)}
-                      {:key-colors [:highlight]
-                       :value-colors [:bad-value]}))
+  (pprint-in-context e (butlast (:in e))
+                     {(last (:in e)) (inline-message e)}
+                     {:key-colors [:highlight]
+                      :value-colors [:bad-value]}))
 
 (defmethod pprint-inline-message ::unknown-key [e]
-  (pprint-sparse-path (::root-data e) (:in e)
-                      {(::unknown-key e) (inline-message e)}))
+  (pprint-in-context e (:in e)
+                     {(::unknown-key e) (inline-message e)}))
 
 (defmethod pprint-inline-message ::misspelled-key [e]
-  (pprint-sparse-path (::root-data e) (:in e)
-                      {(::misspelled-key e) (inline-message e)}))
+  (pprint-in-context e (:in e)
+                     {(::misspelled-key e) (inline-message e)}))
 
 (defmethod pprint-inline-message ::wrong-key [e]
-  (pprint-sparse-path (::root-data e) (:in e)
-                      {(::wrong-key e) (inline-message e)}))
+  (pprint-in-context e (:in e)
+                     {(::wrong-key e) (inline-message e)}))
 
-(defmethod pprint-inline-message ::missing-required-keys [e]
+(defn pprint-missing-keys-context [e]
   (pprint-sparse-path (reduce #(assoc-in %1 (conj (vec (:in e)) %2)
                                          '...)
                               (::root-data e)
@@ -502,6 +534,58 @@
                             (map (fn [k]
                                    [k (str "The required key " (pr-str k) " is missing")]))
                             (::missing-keys e))))
+
+(defn insert-missing-keys [formatted-lines kys line column]
+  (concat
+   (take-while #(= (first %) :line) formatted-lines)
+   (let [r (drop-while #(= (first %) :line) formatted-lines)]
+     (concat
+      [(->> (first r) rest (cons :line) vec)]
+      (mapv (fn [k] [:error-line nil (str (cp/blanks column)
+                                          (pr-str k) "   <- missing required key")]) kys)
+      (rest r)))))
+
+(defn inline-missing-keys? [e]
+  (let [m (get-in (::root-data e) (:in e))]
+    (when (<= 2 (count m))
+      (let [[first-key second-key] (keys m)
+            loc-data1 (edn-string-nav/get-path-in-clj-file (conj (vec (:in e)) first-key)
+                                                           (::file-source e))
+            loc-data2 (edn-string-nav/get-path-in-clj-file (conj (vec (:in e)) second-key)
+                                                           (::file-source e))]
+        (when (not= (:line loc-data1) (:line loc-data2))
+          loc-data1)))))
+
+(defn pprint-missing-keys-in-file-context [e]
+  (let [m (get-in (::root-data e) (:in e))]
+    (if-let [{:keys [line column value path loc]}
+             (inline-missing-keys? e)]
+      (do (-> (cp/fetch-lines (::file-source e))
+              (cp/number-lines)
+              (cp/insert-message line column
+                                 (str "Map is missing required key"
+                                      (if (= 1 (count (::missing-keys e)))
+                                        "" "s")))
+              (insert-missing-keys (::missing-keys e) line column )
+              (cp/extract-range-from-center line 10)
+              cp/trim-blank-lines
+              cp/blank-space-trim
+              cp/format-line-numbers
+              cp/color-lines
+              cp/print-formatted-lines)
+          true)
+      (print-in-file (::file-source e)
+                     (:in e)
+                     (str "Map is missing required key"
+                          (if (= 1 (count (::missing-keys e)))
+                            (str " " (pr-str (first (::missing-keys e))))
+                            (str "s " (string/join ", " (map pr-str (::missing-keys e))))
+                            ))))))
+
+(defmethod pprint-inline-message ::missing-required-keys [e]
+  (or
+   (pprint-missing-keys-in-file-context e)
+   (pprint-missing-keys-context e)))
 
 (defn test-print [error]
   (println (color "---------------------------------\n" :header))
@@ -514,17 +598,13 @@
   )
 
 (do
-  (def structer [{:compiler 1
-                :id 1
-                :asdfasdf [1 2]
-                ;:source-paths [""]
-                }])
+  (def structer (read-string (slurp "tester.edn")))
 
   (def terr (s/explain-data :fig-opt/builds structer))
 
   (with-ansi
     (->> 
-     (prepare-errors terr structer )
+     (prepare-errors terr structer "tester.edn")
      #_(map pprint-inline-message)
      (mapv test-print)
      #_ (mapv error-message)
