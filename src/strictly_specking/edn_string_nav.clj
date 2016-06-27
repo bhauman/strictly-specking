@@ -144,7 +144,7 @@
         node (zip/node l)]
     (->> root-zip
          (direction zip/next)
-         (take-while #(not= node (zip/node %)))
+         (take-while #(not= l %))
          (filter at-newline?)
          count
          inc)))
@@ -210,8 +210,30 @@
        :value  (or (sjacket->clj (-> point-loc next-value zip/node))
                    (sjacket->clj (zip/node point-loc)))
        :path path
-       ; :loc point-loc
+       :loc point-loc
        })))
+
+#_(def x (:loc (get-path-in-clj-file [0 :asdfasdf 0] "tester.edn")))
+
+
+#_(defn line-number [l]
+  (let [root-zip (->root-loc l)
+        node (zip/node l)]
+    (->> root-zip
+         (direction zip/next)
+         (take-while #(not= l %))
+         (filter at-newline?)
+         count
+         inc)))
+
+#_(line-number x)
+
+#_(zip/node x)
+#_(->> (->root-loc x)
+     (direction zip/next)
+     (take
+      40)
+     last)
 
 
 #_ (get-path-in-clj-file [:cljsbuild :builds 0] "project.clj")
