@@ -70,20 +70,21 @@
 
 (defn blank-space-trim [formatted-lines]
   (let [min-lead (min-blank-lead formatted-lines)]
-    (when (> min-lead 6)
+    (if (> min-lead 6)
       (let [subtract-lead (- min-lead 6)]
         (map (fn [[t l b]]
                [t l (if (string/blank? b)
                       b
                       (subs b subtract-lead))])
-             formatted-lines)))))
+             formatted-lines)))
+    formatted-lines))
 
 (defn format-line-numbers [formatted-lines]
   (let [max-char-length (+ 2 (count (str (max-line-number formatted-lines))))]
     (map
      (fn [[t l b]]
        [t
-        (if (#{:line :error-line} t)
+        (if (and (#{:line :error-line} t) (integer? l))
           (format (str "%" max-char-length "d ") l)
           (str (blanks (inc max-char-length))))
         b])
@@ -141,13 +142,15 @@
       blank-space-trim
       format-line-numbers
       color-lines
-      print-formatted-lines))
+      print-formatted-lines
+      ))
 
 #_(print-message-in-context-of-file "project.clj" 35 28 "here I am" )
 
 #_(-> (fetch-lines "project.clj")
       number-lines
       (insert-message 35 28 "here I am \nonce again \nonce again  \nonce again again")
+      (insert-missing-keys [:asdf :ASDFG] 35 28)
       (extract-range-from-center 35 10)
       blank-space-trim
       format-line-numbers
