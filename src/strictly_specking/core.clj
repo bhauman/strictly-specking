@@ -369,18 +369,18 @@
   (let [k (last in)]
     (cond
       (parent-map? e)
-      (str "The key " (color (pr-str k) :focus-key)
+      (str "  The key " (color (pr-str k) :focus-key)
            " has the wrong value "
            (color (format-summarized-value val) :bad-value)
            ".\n  " (format-predicate-str e))
       (parent-coll? e)
-      (str "The " (parent-type-str e)
+      (str "  The " (parent-type-str e)
            " at " (color (pr-str (vec (butlast in))) :focus-path)
            " contains bad value "
            (color (format-summarized-value val) :bad-value)
            ".\n  " (format-predicate-str e))
       :else
-      (str "The key " (color (pr-str k) :focus-key)
+      (str "  The key " (color (pr-str k) :focus-key)
            " has the wrong value "
            (color (format-summarized-value val) :bad-value)
            ".\n  " (format-predicate-str e)))))
@@ -389,21 +389,21 @@
 (defmethod error-message ::bad-value-comb-pred [e] (bad-value-message e))
 
 (defmethod error-message ::should-not-be-empty [{:keys [path pred val reason via in] :as e}]
-  (str "The value " (color (pr-str val) :bad-value)
+  (str "  The value " (color (pr-str val) :bad-value)
        " at key " (color (last in) :focus-key)
        " should not be empty.\n  "
        (format-predicate-str (update-in e [:pred] (fn [x] (list '+ x))))))
 
 (defmethod error-message ::unknown-key [{:keys [path pred val reason via in] :as e}]
-  (str "Found unrecognized key " (color (::unknown-key e) :error-key)
+  (str "  Found unrecognized key " (color (::unknown-key e) :error-key)
        " at path " (color (pr-str in) :focus-path) "\n"
        "  Must be one of: " (format-seq-with-or pred)))
 
 (defmethod error-message ::missing-required-keys [{:keys [path pred val reason via in] :as e}]
   (when-let [kys (not-empty (::missing-keys e))]
     (if (< 1 (count kys))
-      (str "Missing required keys " (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path))
-      (str "Missing required key "  (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path)))))
+      (str "  Missing required keys " (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path))
+      (str "  Missing required key "  (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path)))))
 
 ;; *** TODO ::wrong-key
 ;; upon reflection misspelling and wrong keys should have multiple options for correction
@@ -411,7 +411,7 @@
 ;; but the scores of the top choices should be close and in order 
 
 (defmethod error-message ::wrong-key [{:keys [path pred val reason via in] :as e}]
-  (str "The key " (color (::wrong-key e) :error-key)
+  (str "  The key " (color (::wrong-key e) :error-key)
        " is unrecognized. Perhaps you meant "
        (color (::correct-key e) :correct-key)
        "?"))
@@ -421,7 +421,7 @@
 ;; we probably should move ::correct-key to ::correct-keys
 
 (defmethod error-message ::misspelled-key [{:keys [path pred val reason via in] :as e}]
-  (str "The key " (color (::misspelled-key e) :error-key)
+  (str "  The key " (color (::misspelled-key e) :error-key)
        " is misspelled. It should probably be "
        (color (::correct-key e) :correct-key)))
 
@@ -487,7 +487,9 @@
         path        (conj (vec base-path) k)]
     (when-let [{:keys [line column value path loc]}
                (edn-string-nav/get-path-in-clj-file path file)]
-      (cp/print-message-in-context-of-file file line column message))))
+      (println "  File:" (str file))
+      (cp/print-message-in-context-of-file file line column message)
+      true)))
 
 #_(edn-string-nav/get-path-in-clj-file [0] "tester.edn")
 
@@ -495,8 +497,9 @@
   ([e base-path key-message-map]
    (pprint-in-context e base-path key-message-map {}))
   ([e base-path key-message-map colors]
-   (if (::file-source e)
-     (pprint-in-file (::file-source e) base-path key-message-map)
+   (or (and
+        (::file-source e)
+        (pprint-in-file (::file-source e) base-path key-message-map))
      (pprint-sparse-path (::root-data e) base-path key-message-map colors))))
 
 ;; *** pprint inline message
@@ -536,14 +539,16 @@
                             (::missing-keys e))))
 
 (defn insert-missing-keys [formatted-lines kys line column]
-  (concat
-   (take-while #(= (first %) :line) formatted-lines)
-   (let [r (drop-while #(= (first %) :line) formatted-lines)]
-     (concat
-      [(->> (first r) rest (cons :line) vec)]
-      (mapv (fn [k] [:error-line nil (str (cp/blanks column)
-                                          (pr-str k) "   <- missing required key")]) kys)
-      (rest r)))))
+  (let [length (apply max (map (comp count str) kys))]
+    (concat
+     (take-while #(= (first %) :line) formatted-lines)
+     (let [r (drop-while #(= (first %) :line) formatted-lines)]
+       (concat
+        [(->> (first r) rest (cons :line) vec)]
+        (mapv (fn [k] [:error-line nil
+                       (str (cp/blanks column)
+                            (format (str "%-" length "s  <- missing required key") k))]) kys)
+        (rest r))))))
 
 (defn inline-missing-keys? [e]
   (let [m (get-in (::root-data e) (:in e))]
@@ -560,27 +565,30 @@
   (let [m (get-in (::root-data e) (:in e))]
     (if-let [{:keys [line column value path loc]}
              (inline-missing-keys? e)]
-      (do (-> (cp/fetch-lines (::file-source e))
-              (cp/number-lines)
-              (cp/insert-message line column
-                                 (str "Map is missing required key"
-                                      (if (= 1 (count (::missing-keys e)))
-                                        "" "s")))
-              (insert-missing-keys (::missing-keys e) line column )
-              (cp/extract-range-from-center line 10)
-              cp/trim-blank-lines
-              cp/blank-space-trim
-              cp/format-line-numbers
-              cp/color-lines
-              cp/print-formatted-lines)
-          true)
-      (print-in-file (::file-source e)
-                     (:in e)
-                     (str "Map is missing required key"
-                          (if (= 1 (count (::missing-keys e)))
-                            (str " " (pr-str (first (::missing-keys e))))
-                            (str "s " (string/join ", " (map pr-str (::missing-keys e))))
-                            ))))))
+      (do
+        (println "  File:" (str (::file-source e)))
+        (-> (cp/fetch-lines (::file-source e))
+            (cp/number-lines)
+            (cp/insert-message line column
+                               (str "Map is missing required key"
+                                    (if (= 1 (count (::missing-keys e)))
+                                      "" "s")))
+            (insert-missing-keys (::missing-keys e) line column )
+            (cp/extract-range-from-center line 10)
+            cp/trim-blank-lines
+            cp/blank-space-trim
+            cp/format-line-numbers
+            cp/color-lines
+            cp/print-formatted-lines)
+        true)
+      (pprint-in-file (::file-source e)
+                      (butlast (:in e))
+                      {(last (:in e))
+                       (str "Map is missing required key"
+                            (if (= 1 (count (::missing-keys e)))
+                              (str ": " (pr-str (first (::missing-keys e))))
+                              (str "s: " (string/join ", " (map pr-str (::missing-keys e))))
+                              ))}))))
 
 (defmethod pprint-inline-message ::missing-required-keys [e]
   (or
