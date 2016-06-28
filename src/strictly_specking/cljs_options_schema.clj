@@ -1,23 +1,40 @@
 (ns strictly-specking.cljs-options-schema
   (:require
    [clojure.spec :as s]
-   [strictly-specking.core :refer [strict-keys def-key-doc]]))
+   [clojure.string :as string]
+   [strictly-specking.core :refer [def-key
+                                   strict-keys
+                                   attach-reason
+                                   attach-warning
+                                   non-blank-string?] :as ss]
+   [clojure.test :refer [deftest is testing]]))
 
-(defmacro def-key [k spec doc]
-  `(do
-     (s/def ~k ~spec)
-     (def-key-doc ~k ~doc)))
+;; for development
+#_(ss/reset-duplicate-keys)
 
 ;; * Specification for ClojureScript
 ;; ** Top level util specs
 
-(s/def ::string-or-symbol (s/or :string string? :symbol symbol?))
-(s/def ::string-or-named  (s/or :string string? :symbol symbol? :keyword keyword?))
+(def-key ::string-or-symbol (s/or :string non-blank-string? :symbol symbol?))
+(def-key ::string-or-named  (s/or :string non-blank-string? :symbol symbol? :keyword keyword?))
 
 ;; ** CLJS Compiler Options
 ;; *** Commonly used Compiler Options
+;; **** TODO Look at the use of clojure.spec/+
 
-(def-key ::output-to string?
+;; The clojure.spec/+ is used in favor of clojure.spec/* below.  The
+;; assumption is that we want to look at the indivudiual use cases and
+;; decide if an empty expression actually makes sense.
+
+;; This conflates the use case of options compliance and creating a
+;; stricter set of options to inform users of possible missuse.
+
+;; I think it's better to have a tighter expression and force folks to
+;; remove/comment out no-op configs, to bring awareness to them.
+;; Commented out configs are more obvious than no-op ones.
+
+(def-key ::output-to non-blank-string?
+  
   "After your ClojureScript has been compiled to JavaScript, this
 specifies the name of the JavaScript output file.  The contents of
 this file will differ based on the :optimizations setting.
@@ -31,7 +48,8 @@ output file will contain all the compiled code.
 
   :output-to \"resources/public/js/main.js\"")
 
-(def-key ::output-dir string?
+(def-key ::output-dir non-blank-string?
+  
   "Sets the output directory for output files generated during
 compilation.
 
@@ -40,7 +58,8 @@ Defaults to  \"out\".
   :output-dir \"resources/public/js/out\"")
 
 (def-key ::optimizations #{:none :whitespace :simple :advanced}
-"The optimization level. May be :none, :whitespace, :simple, or
+  
+  "The optimization level. May be :none, :whitespace, :simple, or
 :advanced. Only :none and :simple are supported for bootstrapped
 ClojureScript.
 
@@ -61,7 +80,8 @@ Defaults to :none. Note: lein cljsbuild 1.0.5 will supply :whitespace.
   :optimizations :none")
 
 (def-key ::main                      ::string-or-symbol
-"Specifies an entry point namespace. When combined with optimization
+  
+  "Specifies an entry point namespace. When combined with optimization
 level :none, :main will cause the compiler to emit a single JavaScript
 file that will import goog/base.js, the JavaScript file for the
 namespace, and emit the required goog.require statement. This permits
@@ -72,6 +92,7 @@ Also see :asset-path.
   :main \"example.core\"")
 
 (def-key ::asset-path                string?
+  
   "When using :main it is often necessary to control where the entry
 point script attempts to load scripts from due to the configuration of
 the web server. :asset-path is a relative URL path not a file system
@@ -82,7 +103,8 @@ scripts from \"js/compiled/out\".
 
   :asset-path \"js/compiled/out\"")
 
-(def-key ::source-map                (s/or :bool boolean? :string string?)
+(def-key ::source-map                (s/or :bool boolean? :string non-blank-string?)
+  
   "See https://github.com/clojure/clojurescript/wiki/Source-maps. Under
 optimizations :none the valid values are true and false, with the
 default being true. Under all other optimization settings must specify
@@ -92,7 +114,8 @@ Under :simple, :whitespace, or :advanced
   :source-map \"path/to/source/map.js.map\"")
 
 
-(s/def ::preloads                  (s/+ symbol?)
+(def-key ::preloads                  (s/+ symbol?)
+  
   "Developing ClojureScript commonly requires development time only
 side effects such as enabling printing, logging, spec instrumentation,
 and connecting REPLs. :preloads permits loading such side effect
@@ -107,39 +130,42 @@ Now you can configure your development build to load this side effect
 prior to your main namespace with the following compiler options:
 
   {:preloads [foo.dev]
-   :main \"foo.core\"" "
+   :main \"foo.core\"
    :output-dir \"out\"}
 
 The :preloads config value must be a sequence of symbols that map to
 existing namespaces discoverable on the classpath.")
 
 (def-key ::verbose                   boolean?
-"Emit details and measurements from compiler activity.
+  
+  "Emit details and measurements from compiler activity.
 
   :verbose true")
 
-(s/def ::pretty-print              boolean?
+(def-key ::pretty-print              boolean?
+  
   "Determines whether the JavaScript output will be tabulated in a
 human-readable manner. Defaults to true.
 
   :pretty-print false")
 
-(s/def ::target                    #{:nodejs}
-"If targeting nodejs add this line. Takes no other options at the
+(def-key ::target                    #{:nodejs}
+  
+  "If targeting nodejs add this line. Takes no other options at the
 moment. The default (no :target specified) implies browsers are being
 targeted. Have a look here for more information on how to run your
 code in nodejs.
 
   :target :nodejs")
 
-(s/def ::foreign-libs
-  (strict-keys
-   :req-un [::file
-            ::provides]
-   :opt-un [::file-min
-            ::requires
-            ::module-type
-            ::preprocess])
+(def-key ::foreign-libs (strict-keys
+                         :req-un [::file
+                                  ::provides]
+                         :opt-un [::file-min
+                                  ::requires
+                                  ::module-type
+                                  ::preprocess])
+  
   "Adds dependencies on foreign libraries. Be sure that the url returns a
 HTTP Code 200
 
@@ -176,15 +202,16 @@ keys have these semantics:
               the supplied value in order to effect the desired code
               transformation.")
 
-(s/def ::file        string?)
-(s/def ::provides    (s/+ string?))
-(s/def ::file-min    string?)
-(s/def ::requires    (s/+ string?))
-(s/def ::module-type #{:commonjs :amd :es6})
-(s/def ::preprocess  ::string-or-named)
+(def-key ::file        non-blank-string?)
+(def-key ::provides    (s/+ non-blank-string?))
+(def-key ::file-min    non-blank-string?)
+(def-key ::requires    (s/+ non-blank-string?))
+(def-key ::module-type #{:commonjs :amd :es6})
+(def-key ::preprocess  ::string-or-named)
 
-(s/def ::externs                    (s/+ string?)
-"Configure externs files for external libraries.
+(def-key ::externs                    (s/+ non-blank-string?)
+  
+  "Configure externs files for external libraries.
 
 For this option, and those below, you can find a very good explanation at:
 http://lukevanderhart.com/2011/09/30/using-javascript-and-clojurescript.html
@@ -193,14 +220,14 @@ Defaults to the empty vector [].
 
   :externs [\"jquery-externs.js\"]")
 
-(s/def ::modules
-  (s/map-of
-   keyword?
-   (strict-keys
-    :req-un [:cljs.options-schema.modules/output-dir
-             ::entries]
-    :opt-un [::depends-on]))
-"A new option for emitting Google Closure Modules. Closure Modules
+(def-key ::modules (s/map-of
+                    keyword?
+                    (strict-keys
+                     :req-un [:cljs.options-schema.modules/output-dir
+                              ::entries]
+                     :opt-un [::depends-on]))
+  
+  "A new option for emitting Google Closure Modules. Closure Modules
 supports splitting up an optimized build into N different modules. If
 :modules is supplied it replaces the single :output-to. A module needs
 a name, an individual :output-to file path, :entries a set of
@@ -245,26 +272,29 @@ Source maps are fully supported, an individual one will be created for
 each module. Just supply :source-map true (see example) as there is no
 single source map to name.")
 
-;; TODO name collision don't want docs
-;; think about ramifications
-(s/def :cljs.options-schema.modules/output-dir    string?) 
-(s/def ::entries       (s/+ string?))
-(s/def ::depends-on    (s/+ ::string-or-named))
+;; ** TODO name collision don't want docs to collide
+;; this is the only name collision in this 
+(def-key :cljs.options-schema.modules/output-dir    non-blank-string?) 
+(def-key ::entries       (s/+ non-blank-string?))
+(def-key ::depends-on    (s/+ ::string-or-named))
 
-(s/def ::source-map-path            string?
-"Set the path to source files references in source maps to avoid
+(def-key ::source-map-path            string?
+
+  "Set the path to source files references in source maps to avoid
 further web server configuration.
 
   :source-map-path \"public/js\"")
 
-(s/def ::source-map-timestamp       boolean? 
-"Add cache busting timestamps to source map urls. This is helpful for
+(def-key ::source-map-timestamp       boolean? 
+
+  "Add cache busting timestamps to source map urls. This is helpful for
 keeping source maps up to date when live reloading code.
 
   :source-map-timestamp true")
 
-(s/def ::cache-analysis             boolean?
-"Experimental. Cache compiler analysis to disk. This enables faster
+(def-key ::cache-analysis             boolean?
+
+  "Experimental. Cache compiler analysis to disk. This enables faster
 cold build and REPL start up times.
 
 For REPLs, defaults to true. Otherwise, defaults to true if and only
@@ -272,8 +302,9 @@ if :optimizations is :none.
 
   :cache-analysis true")
 
-(s/def ::recompile-dependents       boolean?
-"For correctness the ClojureScript compiler now always recompiles
+(def-key ::recompile-dependents       boolean?
+
+  "For correctness the ClojureScript compiler now always recompiles
 dependent namespaces when a parent namespace changes. This prevents
 corrupted builds and swallowed warnings. However this can impact
 compile times depending on the structure of the application. This
@@ -281,8 +312,9 @@ option defaults to true.
 
   :recompile-dependents false")
 
-(s/def ::static-fns                 boolean?
-"Employs static dispatch to specific function arities in emitted
+(def-key ::static-fns                 boolean?
+
+  "Employs static dispatch to specific function arities in emitted
 JavaScript, as opposed to making use of the call construct. Defaults
 to false except under advanced optimizations. Useful to have set to
 false at REPL development to facilitate function redefinition, and
@@ -293,9 +325,10 @@ compiled with :static-fns implicitly set to true.
 
   :static-fns true")
 
-;; (s/def ::warnings                   (ref-schema 'CompilerWarnings))
+;; (def-key ::warnings                   (ref-schema 'CompilerWarnings))
 
-(s/def ::elide-asserts              boolean?
+(def-key ::elide-asserts              boolean?
+
   "This flag will cause all (assert x) calls to be removed during
 compilation, including implicit asserts associated with :pre and :post
 conditions. Useful for production. Default is always false even in
@@ -308,28 +341,32 @@ the elision.
 
   :elide-asserts true")
 
-(s/def ::pseudo-names               boolean?
+(def-key ::pseudo-names               boolean?
+
   "With :advanced mode optimizations, determines whether readable names
 are emitted. This can be useful when debugging issues in the optimized
 JavaScript and can aid in finding missing externs. Defaults to false.
 
   :pseudo-names true")
 
-(s/def ::print-input-delimiter      boolean?
- "Determines whether comments will be output in the JavaScript that can
+(def-key ::print-input-delimiter      boolean?
+
+  "Determines whether comments will be output in the JavaScript that can
 be used to determine the original source of the compiled code.
 
 Defaults to false.
 
   :print-input-delimiter false")
 
-(s/def ::output-wrapper             boolean?
+(def-key ::output-wrapper             boolean?
+
   "Wrap the JavaScript output in (function(){...};)() to avoid clobbering
 globals. Defaults to false.
 
   :output-wrapper false")
 
-(s/def ::libs                       (s/+ string?)
+(def-key ::libs                       (s/+ string?)
+
   "Adds dependencies on external js libraries, i.e. Google
 Closure-compatible javascript files with correct goog.provides() and
 goog.requires() calls. Note that files in these directories will be
@@ -344,31 +381,35 @@ Defaults to the empty vector []
          \"src/js\"
          \"src/org/example/example.js\"]")
 
-(s/def ::preamble                   (s/+ string?)
-"Prepends the contents of the given files to each output file. Only
+(def-key ::preamble                   (s/+ non-blank-string?)
+
+  "Prepends the contents of the given files to each output file. Only
 valid with optimizations other than :none.
 
 Defaults to the empty vector []
 
   :preamble [\"license.js\"]")
 
-(s/def ::hashbang                   boolean?
-"When using :target :nodejs the compiler will emit a shebang as the
+(def-key ::hashbang                   boolean?
+
+  "When using :target :nodejs the compiler will emit a shebang as the
 first line of the compiled source, making it executable. When your
 intention is to build a node.js module, instead of executable, use
 this option to remove the shebang.
 
   :hashbang false")
 
-(s/def ::compiler-stats             boolean?
-"Report basic timing measurements on compiler activity.
+(def-key ::compiler-stats             boolean?
+
+  "Report basic timing measurements on compiler activity.
 
 Defaults to false.
 
   :compiler-stats true")
 
-(s/def ::language-in                #{:ecmascript3 :ecmascript5 :ecmascript5-strict}
-"Configure the input and output languages for the closure library. May
+(def-key ::language-in                #{:ecmascript3 :ecmascript5 :ecmascript5-strict}
+
+  "Configure the input and output languages for the closure library. May
 be :ecmascript3, ecmascript5, ecmascript5-strict, :ecmascript6-typed,
 :ecmascript6-strict, :ecmascript6 or :no-transpile.
 
@@ -376,8 +417,9 @@ Defaults to :ecmascript3
 
   :language-in  :ecmascript3")
 
-(s/def ::language-out               #{:ecmascript3 :ecmascript5 :ecmascript5-strict}
-"Configure the input and output languages for the closure library. May
+(def-key ::language-out               #{:ecmascript3 :ecmascript5 :ecmascript5-strict}
+
+  "Configure the input and output languages for the closure library. May
 be :ecmascript3, ecmascript5, ecmascript5-strict, :ecmascript6-typed,
 :ecmascript6-strict, :ecmascript6 or :no-transpile.
 
@@ -385,10 +427,12 @@ Defaults to :ecmascript3
 
   :language-out  :ecmascript3")
 
-(s/def ::closure-defines
-  (s/map-of
-   ::string-or-symbol
-   (s/or :number number? :string string? :bool   boolean?))
+(def-key ::closure-defines (s/map-of
+                            ::string-or-symbol
+                            (s/or :number number?
+                                  :string non-blank-string?
+                                  :bool   boolean?))
+
   "Set the values of Closure libraries' variables annotated with @define
 or with the cljs.core/goog-define helper macro. A common usage is
 setting goog.DEBUG to false:
@@ -405,14 +449,16 @@ For :optimization :none, a :main option must be specified for defines
 to work, and only goog-define defines are affected. :closure-defines
 currently does not have any effect with :optimization :whitespace.")
 
-(s/def ::closure-extra-annotations  (s/+ string?)
-"Define extra JSDoc annotations that a closure library might use so
+(def-key ::closure-extra-annotations  (s/+ non-blank-string?)
+
+  "Define extra JSDoc annotations that a closure library might use so
 that they don't trigger compiler warnings.
 
   :closure-extra-annotations #{\"api\"}")
 
-(s/def ::anon-fn-naming-policy      #{:off :unmapped :mapped}
-"Strategies for how the Google Closure compiler does naming of
+(def-key ::anon-fn-naming-policy      #{:off :unmapped :mapped}
+
+  "Strategies for how the Google Closure compiler does naming of
 anonymous functions that occur as r-values in assignments and variable
 declarations. Defaults to :off.
 
@@ -430,8 +476,9 @@ The following values are supported:
           them back to a more meaningful name that's based on the
           left-hand side of the assignment.")
 
-(s/def ::optimize-constants         boolean?
-"When set to true, constants, such as keywords and symbols, will only
+(def-key ::optimize-constants         boolean?
+
+  "When set to true, constants, such as keywords and symbols, will only
 be created once and will be written to a separate file called
 constants_table.js. The compiler will emit a reference to the constant
 as defined in the constants table instead of creating a new object for
@@ -441,27 +488,37 @@ Defaults to true under :advanced optimizations otherwise to false.
 
   :optimize-constants true")
 
-(s/def ::parallel-build             boolean?
+(def-key ::parallel-build             boolean?
+
   "When set to true, compile source in parallel, utilizing multiple cores.
 
 :parallel-build true")
 
-(s/def ::devcards                   boolean?
-"Whether to include devcard 'defcard' definitions in the output of the compile.")
+(def-key ::devcards                   boolean?
 
-(s/def ::dump-core                  boolean?)
-(s/def ::emit-constants             boolean?)
-(s/def ::warning-handlers           (s/+ ::s/any)) ;; symbol, string, or fn?
-(s/def ::source-map-inline          boolean?)
-(s/def ::ups-libs                   (s/+ string?))
-(s/def ::ups-externs                (s/+ string?))
-(s/def ::ups-foreign-libs           (s/+ ::foreign-libs))
-(s/def ::closure-output-charset     string?)
-(s/def ::external-config            (s/map-of keyword? map?))
+  "Whether to include devcard 'defcard' definitions in the output of the compile.")
+
+(def-key ::watch-fn fn?
+
+  "Is a function that will be called after a successful build.
+
+Only available for cljs.build.api/watch
+
+  :watch-fn (fn [] (println \"Updated build\"))")
+
+(def-key ::dump-core                  boolean?)
+(def-key ::emit-constants             boolean?)
+(def-key ::warning-handlers           (s/+ ::s/any)) ;; symbol, string, or fn?
+(def-key ::source-map-inline          boolean?)
+(def-key ::ups-libs                   (s/+ non-blank-string?))
+(def-key ::ups-externs                (s/+ non-blank-string?))
+(def-key ::ups-foreign-libs           (s/+ ::foreign-libs))
+(def-key ::closure-output-charset     non-blank-string?)
+(def-key ::external-config            (s/map-of keyword? map?))
 
 ;; ** ClojureScript Compiler Warnings
 
-(s/def ::warnings
+(def-key ::warnings
   (strict-keys
    :opt-un
    [::undeclared-ns-form
@@ -486,6 +543,7 @@ Defaults to true under :advanced optimizations otherwise to false.
     ::protocol-duped-method
     ::protocol-multiple-impls
     ::invoke-ctor])
+
   "This flag will turn on/off compiler warnings for references to
 undeclared vars, wrong function call arities, etc. Can be a boolean
 for enabling/disabling common warnings, or a map of specific warning
@@ -522,32 +580,33 @@ The following warnings are supported:
   :protocol-multiple-impls, protocol implemented multiple times
   :single-segment-namespace, single segment namespace")
 
-(s/def ::undeclared-ns-form          boolean?)
-(s/def ::protocol-deprecated         boolean?)
-(s/def ::undeclared-protocol-symbol  boolean?)
-(s/def ::fn-var                      boolean?)
-(s/def ::invalid-arithmetic          boolean?)
-(s/def ::preamble-missing            boolean?)
-(s/def ::undeclared-var              boolean?)
-(s/def ::protocol-invalid-method     boolean?)
-(s/def ::variadic-max-arity          boolean?)
-(s/def ::multiple-variadic-overloads boolean?)
-(s/def ::fn-deprecated               boolean?)
-(s/def ::redef                       boolean?)
-(s/def ::fn-arity                    boolean?)
-(s/def ::invalid-protocol-symbol     boolean?)
-(s/def ::dynamic                     boolean?)
-(s/def ::undeclared-ns               boolean?)
-(s/def ::overload-arity              boolean?)
-(s/def ::extending-base-js-type      boolean?)
-(s/def ::single-segment-namespace    boolean?)
-(s/def ::protocol-duped-method       boolean?)
-(s/def ::protocol-multiple-impls     boolean?)
-(s/def ::invoke-ctor                 boolean?)
+;; *** TODO differnet ns??
+(def-key ::undeclared-ns-form          boolean?)
+(def-key ::protocol-deprecated         boolean?)
+(def-key ::undeclared-protocol-symbol  boolean?)
+(def-key ::fn-var                      boolean?)
+(def-key ::invalid-arithmetic          boolean?)
+(def-key ::preamble-missing            boolean?)
+(def-key ::undeclared-var              boolean?)
+(def-key ::protocol-invalid-method     boolean?)
+(def-key ::variadic-max-arity          boolean?)
+(def-key ::multiple-variadic-overloads boolean?)
+(def-key ::fn-deprecated               boolean?)
+(def-key ::redef                       boolean?)
+(def-key ::fn-arity                    boolean?)
+(def-key ::invalid-protocol-symbol     boolean?)
+(def-key ::dynamic                     boolean?)
+(def-key ::undeclared-ns               boolean?)
+(def-key ::overload-arity              boolean?)
+(def-key ::extending-base-js-type      boolean?)
+(def-key ::single-segment-namespace    boolean?)
+(def-key ::protocol-duped-method       boolean?)
+(def-key ::protocol-multiple-impls     boolean?)
+(def-key ::invoke-ctor                 boolean?)
 
 ;; ** Closure Compiler Warnings
 
-(s/def ::closure-warnings
+(def-key ::closure-warnings
   (strict-keys
    :opt-un
    [::access-controls
@@ -575,6 +634,7 @@ The following warnings are supported:
     ::undefined-variables
     ::unknown-defines
     ::visiblity])
+
   "Configure warnings generated by the Closure compiler. A map from
 Closure warning to configuration value, only :error, :warning and :off
 are supported.
@@ -611,267 +671,189 @@ The following Closure warning options are exposed to ClojureScript:
   
 See the Closure Compiler Warning wiki for detailed descriptions.")
 
-(s/def ::warning-value #{:error :warning :off})
+(def-key ::warning-value #{:error :warning :off})
 
-(s/def ::access-controls            ::warning-value)
-(s/def ::ambiguous-function-decl    ::warning-value)
-(s/def ::debugger-statement-present ::warning-value)
-(s/def ::check-regexp               ::warning-value)
-(s/def ::check-types                ::warning-value)
-(s/def ::check-useless-code         ::warning-value)
-(s/def ::check-variables            ::warning-value)
-(s/def ::const                      ::warning-value)
-(s/def ::constant-property          ::warning-value)
-(s/def ::deprecated                 ::warning-value)
-(s/def ::duplicate-message          ::warning-value)
-(s/def ::es5-strict                 ::warning-value)
-(s/def ::externs-validation         ::warning-value)
-(s/def ::fileoverview-jsdoc         ::warning-value)
-(s/def ::global-this                ::warning-value)
-(s/def ::internet-explorer-checks   ::warning-value)
-(s/def ::invalid-casts              ::warning-value)
-(s/def ::missing-properties         ::warning-value)
-(s/def ::non-standard-jsdoc         ::warning-value)
-(s/def ::strict-module-dep-check    ::warning-value)
-(s/def ::tweaks                     ::warning-value)
-(s/def ::undefined-names            ::warning-value)
-(s/def ::undefined-variables        ::warning-value)
-(s/def ::unknown-defines            ::warning-value)
-(s/def ::visiblity                  ::warning-value)
-
-(s/def ::compiler-options
-  (strict-keys
-   :opt-un
-   [::main
-    ::preloads
-    ::asset-path
-    ::output-to
-    ::output-dir
-    ::optimizations
-    ::source-map
-    ::verbose
-    ::pretty-print
-    ::target
-    ::foreign-libs
-    ::externs
-    ::modules
-    ::source-map-path
-    ::source-map-timestamp
-    ::cache-analysis
-    ::recompile-dependents
-    ::static-fns
-    ::elide-asserts
-    ::pseudo-names
-    ::print-input-delimiter
-    ::output-wrapper
-    ::libs
-    ::preamble
-    ::hashbang
-    ::compiler-stats
-    ::language-in
-    ::language-out
-    ::closure-defines
-    ::closure-extra-annotations
-    ::anon-fn-naming-policy
-    ::optimize-constants
-    ::parallel-build
-    ::devcards
-    ::dump-core
-    ::emit-constants
-    ::warning-handlers
-    ::source-map-inline
-    ::ups-libs
-    ::ups-externs
-    ::ups-foreign-libs
-    ::closure-output-charset
-    ::external-config]))
+;; *** TODO differnet ns??
+(def-key ::access-controls            ::warning-value)
+(def-key ::ambiguous-function-decl    ::warning-value)
+(def-key ::debugger-statement-present ::warning-value)
+(def-key ::check-regexp               ::warning-value)
+(def-key ::check-types                ::warning-value)
+(def-key ::check-useless-code         ::warning-value)
+(def-key ::check-variables            ::warning-value)
+(def-key ::const                      ::warning-value)
+(def-key ::constant-property          ::warning-value)
+(def-key ::deprecated                 ::warning-value)
+(def-key ::duplicate-message          ::warning-value)
+(def-key ::es5-strict                 ::warning-value)
+(def-key ::externs-validation         ::warning-value)
+(def-key ::fileoverview-jsdoc         ::warning-value)
+(def-key ::global-this                ::warning-value)
+(def-key ::internet-explorer-checks   ::warning-value)
+(def-key ::invalid-casts              ::warning-value)
+(def-key ::missing-properties         ::warning-value)
+(def-key ::non-standard-jsdoc         ::warning-value)
+(def-key ::strict-module-dep-check    ::warning-value)
+(def-key ::tweaks                     ::warning-value)
+(def-key ::undefined-names            ::warning-value)
+(def-key ::undefined-variables        ::warning-value)
+(def-key ::unknown-defines            ::warning-value)
+(def-key ::visiblity                  ::warning-value)
 
 
-;; ** Figwheel Client Options
+;; opt none helper
+(defn- opt-none? [opt]
+  (or (nil? opt) (= :none opt)))
 
-(s/def ::build-id             string?)
-(s/def ::websocket-host       (s/or :string string?
-                                                           :host-option
-                                                           #{:js-client-host :server-ip :server-hostname}))
-(s/def ::websocket-url        string?)
-(s/def ::on-jsload            ::string-or-named)
-(s/def ::before-jsload        ::string-or-named)
-(s/def ::on-cssload           ::string-or-named)
-(s/def ::on-message           ::string-or-named)
-(s/def ::on-compile-fail      ::string-or-named)
-(s/def ::on-compile-warning   ::string-or-named)
-(s/def ::reload-dependents    boolean?)
-(s/def ::debug                boolean?)
-(s/def ::autoload             boolean?)
-(s/def ::heads-up-display     boolean?)
-(s/def ::load-warninged-code  boolean?)
-(s/def ::retry-count          integer?)
-(s/def ::devcards             boolean?)
-(s/def ::eval-fn              ::string-or-named)
-(s/def ::open-urls            (s/+ string?))
-
-;; ** Figwheel Build Config
-
-(s/def ::id               ::string-or-named)
-(s/def ::source-paths     (s/+ string?))
-(s/def ::notify-command   (s/+ string?))
-(s/def ::jar              boolean?)
-(s/def ::incremental      boolean?)
-(s/def ::assert           boolean?)
-(s/def ::warning-handlers (s/+ ::s/any))
-
-(s/def ::figwheel
-  (s/or
-   :bool boolean?
-   :figwheel-client-options
-   (strict-keys
-    :opt-un
-    [::build-id
-     ::websocket-host
-     ::websocket-url
-     ::on-jsload
-     ::before-jsload
-     ::on-cssload
-     ::on-message
-     ::on-compile-fail
-     ::on-compile-warning
-     ::reload-dependents
-     ::debug
-     ::autoload
-     ::heads-up-display
-     ::load-warninged-code
-     ::retry-count
-     ::devcards
-     ::eval-fn
-     ::open-urls])))
-
-(s/def ::compiler
-  (strict-keys
-   :opt-un
-   [::main
-    ::preloads
-    ::asset-path
-    ::output-to
-    ::output-dir
-    ::optimizations
-    ::source-map
-    ::verbose
-    ::pretty-print
-    ::target
-    ::foreign-libs
-    ::externs
-    ::modules
-    ::source-map-path
-    ::source-map-timestamp
-    ::cache-analysis
-    ::recompile-dependents
-    ::static-fns
-    ::elide-asserts
-    ::pseudo-names
-    ::print-input-delimiter
-    ::output-wrapper
-    ::libs
-    ::preamble
-    ::hashbang
-    ::compiler-stats
-    ::language-in
-    ::language-out
-    ::closure-defines
-    ::closure-extra-annotations
-    ::anon-fn-naming-policy
-    ::optimize-constants
-    ::parallel-build
-    ::devcards
-    ::dump-core
-    ::emit-constants
-    ::warning-handlers
-    ::source-map-inline
-    ::ups-libs
-    ::ups-externs
-    ::ups-foreign-libs
-    ::closure-output-charset
-    ::external-config]))
-
-(s/def ::options
-  (strict-keys
-   :opt-un
-   [::id
-    ::notify-command
-    ::jar
-    ::incremental
-    ::assert
-    ::warning-handlers
-    ::figwheel]
-   :req-un
-   [::source-paths
-    ::compiler]))
-
-(s/def ::compiler-require-id
+;; ** The Top level Options Map for the cljs/build fn
+(def-key ::compiler-options
   (s/and
-   ::options
-   (s/keys
-    :req-un [::id])))
-
-(s/def ::http-server-root  string?)
-(s/def ::server-port       integer?)
-(s/def ::server-ip         string?)
-(s/def ::css-dirs          (s/+ string?))
-(s/def ::ring-handler      ::string-or-named)
-(s/def ::builds-to-start   (s/+ ::string-or-named))
-(s/def ::server-logfile    string?)
-(s/def ::open-file-command string?)
-(s/def ::repl              boolean?)
-(s/def ::nrepl-port        integer?)
-(s/def ::nrepl-host        string?)
-(s/def ::nrepl-middleware  (s/+ ::string-or-named)) ;; allow inlined
-(s/def ::validate-config   boolean?)
-(s/def ::load-all-builds   boolean?)
-(s/def ::ansi-color-output boolean?)
-
-(s/def ::builds
-  (s/or
-   :builds-vector (s/+ ::compiler-require-id)
-   :builds-map    (s/map-of ::string-or-named ::options)))
-
-(s/def ::hawk-options
-  (s/map-of #{:watcher} #{:barbary :java :polling}))
-
-(s/def ::clj  boolean?)
-(s/def ::cljs boolean?)
-
-(s/def ::reload-clj-files
-  (s/or
-   :bool boolean?
-   :suffix-map
    (strict-keys
     :opt-un
-    [::clj
-     ::cljs])))
+    [::main
+     ::preloads
+     ::asset-path
+     ::output-to
+     ::output-dir
+     ::optimizations
+     ::source-map
+     ::verbose
+     ::pretty-print
+     ::target
+     ::foreign-libs
+     ::externs
+     ::modules
+     ::source-map-path
+     ::source-map-timestamp
+     ::cache-analysis
+     ::recompile-dependents
+     ::static-fns
+     ::elide-asserts
+     ::pseudo-names
+     ::print-input-delimiter
+     ::output-wrapper
+     ::libs
+     ::preamble
+     ::hashbang
+     ::compiler-stats
+     ::language-in
+     ::language-out
+     ::closure-defines
+     ::closure-extra-annotations
+     ::anon-fn-naming-policy
+     ::optimize-constants
+     ::parallel-build
+     ::devcards
+     ::dump-core
+     ::emit-constants
+     ::warning-handlers
+     ::source-map-inline
+     ::ups-libs
+     ::ups-externs
+     ::ups-foreign-libs
+     ::closure-output-charset
+     ::external-config
+     ::watch-fn])
+   
+   (attach-warning ":asset-path has no effect without a :main"
+                   (fn [{:keys [asset-path main]}]
+                     (not (and (some? asset-path)
+                               (nil? main)))))
+   
+   (attach-warning ":pseudo-names has no effect when :optimizations is not :advanced"
+                   (fn [{:keys [pseudo-names optimizations]}]
+                     (not (and (some? pseudo-names) (not= optimizations :advanced)))))
 
-;; ** Lein Cljsbuild Options
+   ;; **** TODO add in the cljs.compiler unknown/similar-key warning here
+   
+   ;; these next warnings probably be elevated to an errors attach-reason
+   (attach-warning ":preamble has no effect when :optimizations is not :none"
+                   (fn [{:keys [preamble optimizations]}]
+                     (not (and (some? preamble)
+                               (not (opt-none? optimizations))))))
+   
+   (attach-warning ":hashbang has no effect when :target is not :nodejs"
+                   (fn [{:keys [hashbang target]}]
+                     (not (and (some? hashbang) (not= target :nodejs)))))
+   
+   (attach-warning ":clojure-defines has no effect when :optimizations is :whitespace"
+                   (fn [{:keys [closure-defines optimizations]}]
+                     (not (and (some? closure-defines)
+                               (= :whitespace optimizations)))))
 
-#_(s/def ::builds                (ref-schema 'CljsBuilds))
-(s/def ::repl-listen-port      integer?)
-(s/def ::repl-launch-commands  (map-of
-                                                 ::string-or-named
-                                                 (s/+ ::string-or-named)))
-(s/def ::test-commands         (map-of
-                                                 ::string-or-named
-                                                 (s/+ ::string-or-named)))
-(s/def ::crossovers            (s/+ ::s/any))
-(s/def ::crossover-path        (s/+ ::s/any))
-(s/def ::crossover-jar         boolean?)
+   (attach-warning "missing an :output-to option - you probably will want this ..."
+                   (fn [{:keys [output-to]}] (some? output-to)))
+   
+   (attach-reason  ":closure-defines requires a :main when :optimizations is :none"
+                   (fn [{:keys [closure-defines optimizations main]}]
+                     (not (and (some? closure-defines)
+                               (nil? main)
+                               (opt-none? optimizations)))))
+   
+   (attach-reason  ":source-map must be a boolean when :optimizations is :none"
+                   (fn [{:keys [source-map optimizations]}]
+                     (not (and
+                           (some? source-map)
+                           (not (boolean? source-map))
+                           (opt-none? optimizations)))))
 
-(s/def ::cljsbuilds
-  (strict-keys
-   :opt-un [::builds
-            ::repl-listen-port
-            ::repl-launch-commands
-            ::test-commands
-            ::crossovers
-            ::crossover-path
-            ::crossover-jar]))
+   (attach-reason  ":source-map must be a string? when :optimizations is not :none"
+                   (fn [{:keys [source-map optimizations]}]
+                     (not (and
+                           (some? source-map)
+                           (not (string? source-map))
+                           (not (opt-none? optimizations))))))
+   ))
 
+(comment
+  
+  (s/conform ::compiler-options {:asset-path "asdf/asdf"})
+  (s/explain ::compiler-options {:source-map "asdf" :optimizations :none})
+  (s/explain ::compiler-options {:source-map false :optimizations :simple})
 
-;; ** Different Top Level Schemas depending on context
+  (key-docs-for-explain-data (s/explain-data ::compiler-options {:output-wrapper 1}))
+  
+  (def not-blank? (complement string/blank?))
 
+  (deftest verify-warnings-and-reasons
+    ;; no warnings or errors on a perectly valid empty options
+    (is (s/valid? ::compiler-options {}))
+    (is (string/blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"}))))
+    
+    (testing "warnings produce warnings and are still valid"
+      ;; no warning produced
+      ;; :asset-path
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:asset-path "asdf/asdf"}))))
+      (is (s/valid? ::compiler-options {:asset-path "asdf/asdf"}))
+      
+      ;; pseudo-names
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:pseudo-names true}))))
+      (is (s/valid? ::compiler-options {:pseudo-names true}))
+      
+      ;; preamble
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:preamble ["asdf"] :optimizations :advanced}))))
+      (is (s/valid? ::compiler-options {:preamble ["asdf"] :optimizations :advanced}))    
+      
+      ;; hash-bang
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:hashbang true}))))
+      (is (s/valid? ::compiler-options {:hashbang true}))
+      
+      ;; clojure-defines
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:closure-defines {'goog.DEBUG false}
+                                                                  :optimizations :whitespace}))))
+      (is (s/valid? ::compiler-options {:closure-defines {'goog.DEBUG false}
+                                      :optimizations :whitespace}))        
+      
+      )
+
+    (testing "fail on attach-reason predicates"
+      (is (not (s/valid? ::compiler-options {:closure-defines {'goog.DEBUG false}})))
+      (is (not (s/valid? ::compiler-options {:source-map "asdf"})))
+      (is (not (s/valid? ::compiler-options {:source-map false :optimizations :advanced})))
+      )
+    
+    (is (s/valid? ::compiler-options { :optimizations :advanced})))
+  
+  (clojure.test/run-tests 'strictly-specking.cljs-options-schema)
+  
+)
