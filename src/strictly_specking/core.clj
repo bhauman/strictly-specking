@@ -15,63 +15,7 @@
 ;; * some initial rules to test with
 ;; 
 
-(defn init-test-rules []
-  (s/def :fig-opt/housers1 string?)
-  (s/def :fig-opt/housers2 string?)
-  (s/def :fig-opt/housers3 string?)
-  
-  (s/def :fig-opt/house (strict-keys
-                         :opt-un [:fig-opt/housers1 
-                                  :fig-opt/housers2 
-                                  :fig-opt/housers3
-                                  :fig-opt/car1]))
-  
-  (s/def :fig-opt/car1 string?)
-  (s/def :fig-opt/car2 string?)
-  (s/def :fig-opt/car3 string?)
-  
-  (s/def :fig-opt/car (strict-keys
-                       :opt-un [:fig-opt/car1
-                                :fig-opt/car2
-                                :fig-opt/car3]))
-  
-  (s/def :fig-opt/real (strict-keys
-                        :opt-un [:fig-opt/car
-                                 :fig-opt/house]))
-  
-  (s/def :build-config/id (s/or :string string? :keyword keyword?))
-  (s/def :build-config/source-paths (s/+ string?))
-  (s/def :build-config/asdfasdf (s/* string?))  
-  (s/def :build-config/assert #(or (true? %) (false? %)))
-  (s/def :fig-opt/build-config (strict-keys :req-un [
-                                                     :build-config/id
-                                                     :build-config/source-paths]
-                                            :opt-un [:build-config/assert
-                                                     :build-config/asdfasdf]))
 
-  (s/def :fig-opt/loose-build-config (s/keys :req-un [
-                                                      :build-config/id
-                                                      :build-config/source-paths]
-                                             :opt-un [:build-config/assert
-                                                      :build-config/asdfasdf]))
-  
-  
-  (s/def :fig-opt/http-server-root string?)
-  (s/def :fig-opt/server-port      integer?)
-  (s/def :fig-opt/server-ip        string?)
-  (s/def :fig-opt/builds           (s/+ :fig-opt/build-config))
-  
-  
-  (s/def :project-top/figwheel (strict-keys
-                                :opt-un [:fig-opt/http-server-root
-                                         :fig-opt/server-port
-                                         :fig-opt/server-ip]
-                                :req-un [:fig-opt/builds]))
-  
-  
-  )
-
-#_ (init-test-rules)
 
 ;; * strict-keys macro
 
@@ -196,19 +140,7 @@
       fixed-errs)
     errors))
 
-;; still rough
-;; need a notion of a source ;; pure data vs. file source
-(defn prepare-errors [explain-data validated-data file]
-  (->> explain-data
-       ::s/problems
-       filter-errors
-       (map #(assoc % ::root-data validated-data))
-       (map #(if file
-                 (assoc % ::file-source file)
-               %))       
-       sort-errors
-       combined-or-pred
-       corrections-overide-missing-required))
+
 
 #_(->> terrors
       ::s/problems
@@ -239,6 +171,21 @@
   (sort-by
    (fn [v] (let [pos (.indexOf error-precedence (::error-type v))]
              (if (neg? pos) 10000 pos))) errors))
+
+
+;; still rough
+;; need a notion of a source ;; pure data vs. file source
+(defn prepare-errors [explain-data validated-data file]
+  (->> explain-data
+       ::s/problems
+       filter-errors
+       (map #(assoc % ::root-data validated-data))
+       (map #(if file
+                 (assoc % ::file-source file)
+               %))       
+       sort-errors
+       combined-or-pred
+       corrections-overide-missing-required))
 
 ;; ** error-message function
 ;; this will provide a more meaningful description of whats gone wrong
@@ -605,7 +552,7 @@
   (println (color "---------------------------------\n" :footer))  
   )
 
-(do
+(comment
   (def structer (read-string (slurp "tester.edn")))
 
   (def terr (s/explain-data :fig-opt/builds structer))
@@ -676,4 +623,65 @@
 ;;   that given all the config data, and a path to the key
 ;;   that will provide an explanation of the behavior of that key
 ;;   in its current value, in conjuntion with the rest of the configuration
+
+
+(defn init-test-rules []
+  (s/def :fig-opt/housers1 string?)
+  (s/def :fig-opt/housers2 string?)
+  (s/def :fig-opt/housers3 string?)
+  
+  (s/def :fig-opt/house (strict-keys
+                         :opt-un [:fig-opt/housers1 
+                                  :fig-opt/housers2 
+                                  :fig-opt/housers3
+                                  :fig-opt/car1]))
+  
+  (s/def :fig-opt/car1 string?)
+  (s/def :fig-opt/car2 string?)
+  (s/def :fig-opt/car3 string?)
+  
+  (s/def :fig-opt/car (strict-keys
+                       :opt-un [:fig-opt/car1
+                                :fig-opt/car2
+                                :fig-opt/car3]))
+  
+  (s/def :fig-opt/real (strict-keys
+                        :opt-un [:fig-opt/car
+                                 :fig-opt/house]))
+  
+  (s/def :build-config/id (s/or :string string? :keyword keyword?))
+  (s/def :build-config/source-paths (s/+ string?))
+  (s/def :build-config/asdfasdf (s/* string?))  
+  (s/def :build-config/assert #(or (true? %) (false? %)))
+  (s/def :fig-opt/build-config (strict-keys :req-un [
+                                                     :build-config/id
+                                                     :build-config/source-paths]
+                                            :opt-un [:build-config/assert
+                                                     :build-config/asdfasdf]))
+
+  (s/def :fig-opt/loose-build-config (s/keys :req-un [
+                                                      :build-config/id
+                                                      :build-config/source-paths]
+                                             :opt-un [:build-config/assert
+                                                      :build-config/asdfasdf]))
+  
+  
+  (s/def :fig-opt/http-server-root string?)
+  (s/def :fig-opt/server-port      integer?)
+  (s/def :fig-opt/server-ip        string?)
+  (s/def :fig-opt/builds           (s/+ :fig-opt/build-config))
+  
+  
+  (s/def :project-top/figwheel (strict-keys
+                                :opt-un [:fig-opt/http-server-root
+                                         :fig-opt/server-port
+                                         :fig-opt/server-ip]
+                                :req-un [:fig-opt/builds]))
+  
+  
+  )
+
+#_ (init-test-rules)
+
+
 
