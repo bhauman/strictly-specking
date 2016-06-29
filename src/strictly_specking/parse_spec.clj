@@ -91,14 +91,13 @@
                      path-set)
       path-set)))
 
-(defn expanded-map-of-desc? [desc]
-  (let [[and' [coll-of' [tuple' key-pred val-pred] empty-map'] map?'] desc]
-    (and (= and' 'and)
-         (= coll-of' 'coll-of)
-         (= tuple' 'tuple)
-         (= empty-map' {})
-         (= map?' 'map?))
-    [key-pred val-pred]))
+(defn expanded-map-of-desc? [x]
+  (and (sequential? x)
+       (= (first x) 'every)
+       (even? (count (drop 2 x)))
+       (= 'map?
+          (:clojure.spec/kind-form
+           (apply hash-map (drop 2 x))))))
 
 (defn handle-expanded-map-of [f desc]
   (when-let [[ky-pred val-pred] (expanded-map-of-desc? desc)]
@@ -113,6 +112,8 @@
 ;; also need to make a suite of tests to verify that this is future proof
 ;; and that our expectations about spec descriptions hold firm
 
+
+
 (defn poss-path [f desc]
   (if (and
        (keyword? desc)
@@ -124,7 +125,8 @@
     ;;#{[{:end-ref desc }]}
     (let [poss-path       (partial poss-path f)
           regex-poss-path (partial regex-poss-path f)
-          key-paths       (partial key-paths f)]
+          key-paths       (partial key-paths f)
+          ]
       (condp = (and (sequential? desc)
                     (first desc))
         'keys        (key-paths desc)
@@ -133,8 +135,8 @@
                                          (desc-keyed-vals desc)))
         ;; this is really the intersection of paths, but there is a notion of
         ;; a infinite path set so ...
-        'and         (or (handle-expanded-map-of desc)
-                         (path-set-join (map poss-path (desc-vals desc))))
+        'and         (path-set-join (map poss-path (desc-vals desc)))
+        'merge       (path-set-join (map poss-path (desc-vals desc)))
         
         '*     (path-set-cons int-key (regex-poss-path (second desc)))
         '+     (path-set-cons int-key (regex-poss-path (second desc)))
@@ -147,10 +149,14 @@
         ;; cat is a splicing operation something without a numeric path is going to get one consed on
         
         
-        'tuple   (path-set-cons int-key
-                                (path-set-join (map poss-path (desc-vals desc))))
+        'tuple        (path-set-cons int-key
+                                     (path-set-join (map poss-path (desc-vals desc))))
         'col-of       (path-set-cons int-key (poss-path (second desc)))
         'col-checker  (path-set-cons int-key (poss-path (second desc)))
+        ;; need to check for every tuple
+        ;; 
+        'every  (or (handle-expanded-map-of desc)
+                    (path-set-cons int-key (poss-path (second desc))))
         'map-of (let [key-predicate (second desc)]
                   (path-set-cons {:ky ::pred-key :ky-pred-desc key-predicate}
                                  (poss-path (last desc))))
@@ -176,11 +182,7 @@
    (prevent-recursion-find {:to to :path-keys-seen #{}})
    (s/describe from)))
 
-
-
 #_(find-key-path :fig-opt/real :fig-opt/car1)
-
-
 
 
 ;; regex NOTE

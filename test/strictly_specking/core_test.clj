@@ -55,11 +55,19 @@
                :opt-un [::cljsbuild
                         ::figwheel]))
 
+#_(s/explain-data (strict-keys :opt-un [::attic])
+                {:attic 1})
+
+(defn problem-map [x]
+  (into {}
+        (map (juxt :path identity)
+             (::s/problems x))))
+
+
 
 (deftest misspell
-  (let [e (::s/problems
-           (s/explain-data ::build-config {:idd "asfd"
-                                           :source-path ["src"]}))]
+  (let [e (problem-map (s/explain-data ::build-config {:idd "asfd"
+                                                        :source-path ["src"]}))]
     (is (get e [:misspelled-key :idd]))
     (is (get e [:misspelled-key :source-path]))
     (is (-> e
@@ -81,7 +89,7 @@
             (= :source-paths)))
     )
 
-  (let [e (::s/problems
+  (let [e (problem-map
            (s/explain-data ::root {:cljsbuild "asfd"
                                    :figwheel  {:builds
                                                [{:idd "asfd"
@@ -115,7 +123,7 @@
     ))
 
 (deftest replacement
-  (let [e (::s/problems
+  (let [e (problem-map
            (s/explain-data ::root {:cljsbuild "asfd"
                                    :asdf  {:builds
                                            [{:idd "asfd"
@@ -132,6 +140,10 @@
     
     )
   )
+
+(s/describe (s/merge
+             (s/keys :opt-un [::house])
+             (s/keys :opt-un [::house])))
 
 (deftest describe-expections-for-path-finding
   (is (= (s/describe (s/keys :opt-un [::a ::b]
@@ -150,8 +162,7 @@
            :opt-un
            [::a ::b])))
 
-  (is (= (s/describe (s/map-of keyword? even?))
-         '(and (coll-of (tuple keyword? even?) {}) map?)))
+  (is  (parse/expanded-map-of-desc? (s/describe (s/map-of keyword? even?))))
 
   (is (= (s/describe (s/or :yep (s/map-of keyword? even?)))
          '(or :yep (map-of keyword? even?))))
@@ -159,11 +170,11 @@
   (is (= (s/describe (s/and (s/map-of keyword? even?)))
          '(and (map-of keyword? even?))))
 
-  (is (= (s/describe (s/coll-of keyword? []))
-         '(coll-checker keyword?)))
+  (is (= (take 2 (s/describe (s/coll-of keyword?)))
+         '(every keyword?)))
 
-  (is (= (s/describe (s/and (s/coll-of keyword? [])))
-         '(and (coll-of keyword? []))))
+  (is (= (s/describe (s/and (s/coll-of keyword?)))
+         '(and (coll-of keyword?))))
 
   (is (= (s/describe (s/+ even?))
          '(+ even?)))
@@ -174,6 +185,7 @@
 
   )
 
+;; TODO more pathfinding and parsing tests
 (deftest pathfinding
   (is (= (parse/find-key-path ::root ::bedroom)
          #{(list {:ky-spec ::cljsbuild, :ky :cljsbuild}

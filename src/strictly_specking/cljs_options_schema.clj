@@ -10,13 +10,13 @@
    [clojure.test :refer [deftest is testing]]))
 
 ;; for development
-#_(ss/reset-duplicate-keys)
+(ss/reset-duplicate-keys)
 
 ;; * Specification for ClojureScript
 ;; ** Top level util specs
 
-(def-key ::string-or-symbol (s/or :string non-blank-string? :symbol symbol?))
-(def-key ::string-or-named  (s/or :string non-blank-string? :symbol symbol? :keyword keyword?))
+(def-key ::string-or-symbol (some-fn string? symbol?))
+(def-key ::string-or-named  (some-fn string? symbol? keyword?))
 
 ;; ** CLJS Compiler Options
 ;; *** Commonly used Compiler Options
@@ -158,13 +158,14 @@ code in nodejs.
 
   :target :nodejs")
 
-(def-key ::foreign-libs (strict-keys
-                         :req-un [::file
-                                  ::provides]
-                         :opt-un [::file-min
-                                  ::requires
-                                  ::module-type
-                                  ::preprocess])
+(def-key ::foreign-libs (s/*
+                         (strict-keys
+                          :req-un [::file
+                                   ::provides]
+                          :opt-un [::file-min
+                                   ::requires
+                                   ::module-type
+                                   ::preprocess]))
   
   "Adds dependencies on foreign libraries. Be sure that the url returns a
 HTTP Code 200
@@ -805,7 +806,7 @@ See the Closure Compiler Warning wiki for detailed descriptions.")
                            (not (opt-none? optimizations))))))
    ))
 
-(comment
+(do
   
   (s/conform ::compiler-options {:asset-path "asdf/asdf"})
   (s/explain ::compiler-options {:source-map "asdf" :optimizations :none})

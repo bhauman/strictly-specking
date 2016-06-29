@@ -350,32 +350,31 @@
       (unform* [_ x] (s/unform* keys-spec x))
       (explain* [_ path via in x]
         (not-empty
-         (merge
-          (s/explain* keys-spec path via in x)
-          (when (map? x)
-            (let [[pred-path exp-data]
-                  (first (s/explain* strict path via in x))]
-              (into {}
-                    (->> (keys (:val exp-data))
-                         (filter (complement known-keys))
-                         (map
-                          (fn [unknown-key]
-                            (if-let [suggest (spelling-suggestion spec-key-data x unknown-key)]
-                              [(conj pred-path :misspelled-key unknown-key)
-                               (-> exp-data
-                                 (assoc 
+         (vec
+          (concat
+           (s/explain* keys-spec path via in x)
+           (when (map? x)
+             ;; there should only be one
+             (when-let [exp-data (first (s/explain* strict path via in x))]
+               (when (map? (:val exp-data))
+                 (->> (keys (:val exp-data))
+                      (filter (complement known-keys))
+                      (mapv
+                       (fn [unknown-key]
+                         (if-let [suggest (spelling-suggestion spec-key-data x unknown-key)]
+                           (assoc exp-data
+                                  :path (conj (:path exp-data) :misspelled-key unknown-key)
                                   :strictly-specking.core/misspelled-key unknown-key
-                                  :strictly-specking.core/correct-key suggest))]
-                              (if-let [replace-suggest (replacement-suggestion spec-key-data x unknown-key)]
-                                [(conj pred-path :wrong-key unknown-key)
-                                 (-> exp-data
-                                     (assoc 
-                                      :strictly-specking.core/wrong-key unknown-key
-                                      :strictly-specking.core/correct-key replace-suggest))]
-                                [(conj pred-path :unknown-key unknown-key)
-                                 (-> exp-data
-                                     (assoc :strictly-specking.core/unknown-key unknown-key))])))))))
-            ))))
+                                  :strictly-specking.core/correct-key suggest)
+                           (if-let [replace-suggest
+                                    (replacement-suggestion spec-key-data x unknown-key)]
+                             (assoc exp-data
+                                    :path (conj (:path exp-data) :wrong-key unknown-key)
+                                    :strictly-specking.core/wrong-key unknown-key
+                                    :strictly-specking.core/correct-key replace-suggest)
+                             (assoc exp-data
+                                    :path (conj (:path exp-data) :unknown-key unknown-key)
+                                    :strictly-specking.core/unknown-key unknown-key)))))))))))))
       ;; These can be improved
       (gen* [_ a b c]
         (s/gen* keys-spec a b c))

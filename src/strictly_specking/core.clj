@@ -1,6 +1,6 @@
 (ns strictly-specking.core
   (:require
-   [strictly-specking.parse-spec]
+   [strictly-specking.parse-spec :as parse]
    [strictly-specking.strict-keys :as strict-impl]
    [strictly-specking.ansi-util :as cl :refer [color]]
    [strictly-specking.annotated-pprint :as annot]
@@ -51,9 +51,8 @@
     (unform* [_ x] (s/unform* parent-spec x))
     (explain* [_ path via in x]
       (not-empty
-       (into {}
-             (map (fn [[k v]] [k (assoc v :reason (str (get v :reason) "\n - " reason))])
-                  (s/explain* parent-spec path via in x)))))
+       (mapv #(update-in % [:reason] str "\n - " reason)
+             (s/explain* parent-spec path via in x))))
     ;; These can be improved
     (gen* [_ a b c]
       (s/gen* parent-spec a b c))
@@ -113,19 +112,17 @@
 ;; *** detect missing-keys 
 
 (defn missing-keys [error]
-  (when (and (sequential? (:pred error))
-             (every? (every-pred sequential?
-                                 #(= (first %) 'contains?)
-                                 #(keyword? (last %)))
-                     (:pred error)))
+  (when ((every-pred sequential?
+                     #(= (first %) 'contains?)
+                     #(keyword? (last %)))
+         (:pred error))
     (->> (:pred error)
-         (map last)
+         last
+         vector
          not-empty)))
 
-#_(missing-keys {:pred '[(contains? % :id) (contains? % :source-paths)],
-                 :val {:compiler 1},
-                 :via [:fig-opt/builds :fig-opt/builds :fig-opt/build-config :fig-opt/build-config],
-                 :in [0]})
+
+#_(missing-keys '{:path [], :pred (contains? % :id), :val {}, :via [:fig-opt/build-config], :in []})
 
 ;; *** mark errors with a type
 
@@ -154,7 +151,7 @@
 
 (defn filter-errors [problems]
   (->> problems
-       (map (fn [[k v]] (assoc v :path k)))
+       #_(map (fn [[k v]] (assoc v :path k)))
        (map add-required-keys)
        (map add-error-type)))
 
@@ -166,7 +163,7 @@
   (let [errors-to-comb
         (->> errors
              (filter #(= (::error-type %) ::bad-value))
-             (group-by :in )
+             (group-by :in)
              (filter #(< 1 (count (second %))))
              (map (fn [[_ errors]]
                     (assoc (first errors)
@@ -174,8 +171,25 @@
                            :path (cons ::combined-path (map :path errors))
                            ::error-type ::bad-value-comb-pred))))
         paths (set (map :in errors-to-comb))]
-    (concat   (filter #(not (paths (:in %))) errors)
-              errors-to-comb)))
+    (concat (filter #(not (paths (:in %))) errors)
+            errors-to-comb)))
+
+;; *** combine missing-keys errors
+;; missing keys for the same location can be combined
+
+(defn combined-missing-keys [errors]
+  (let [errors-to-comb
+        (->> errors
+             (filter #(= (::error-type %) ::missing-required-keys))
+             (group-by :in)
+             (filter #(< 1 (count (second %))))
+             (map (fn [[_ errors]]
+                    (assoc (first errors)
+                           :pred (cons 'and (map :pred errors))
+                           ::missing-keys (vec (mapcat ::missing-keys errors))))))
+        paths (set (map :in errors-to-comb))]
+    (concat (filter #(not (paths (:in %))) errors)
+            errors-to-comb)))
 
 ;; *** corrections overide missing
 ;; if there is an error with a ::correct-key in it eliminate any ::missing-required-keys reference
@@ -248,6 +262,7 @@
                  (assoc % ::file-source file)
                %))       
        sort-errors
+       combined-missing-keys
        combined-or-pred
        corrections-overide-missing-required))
 
@@ -606,30 +621,6 @@
    (pprint-missing-keys-in-file-context e)
    (pprint-missing-keys-context e)))
 
-(defn test-print [error]
-  (println (color "---------------------------------\n" :header))
-  (println (error-message error))
-  (println "\n")
-  ;; could should indent this
-  (pprint-inline-message error)
-  (println "\n")
-  (println (color "---------------------------------\n" :footer))  
-  )
-
-(comment
-  (def structer (read-string (slurp "tester.edn")))
-
-  (def terr (s/explain-data :fig-opt/builds structer))
-
-  (with-ansi
-    (->> 
-     (prepare-errors terr structer "tester.edn")
-     #_(map pprint-inline-message)
-     (mapv test-print)
-     #_ (mapv error-message)
-     #_ (map println)))
-  )
-
 ;; * docs on keys
 ;;
 
@@ -681,20 +672,20 @@
 (def ^:private duplicate-keys (atom {}))
 
 (defn duplicate-key-check* [k]
-    (when (get @duplicate-keys k)
-      (throw (ex-info "Error duplicate key spec" {:k k})))
-    (swap! duplicate-keys assoc k true)
-    k)
-
-;; parse out args
-(def def-key-arg-spec (s/cat :k (s/and keyword? namespace)
-                             :spec ::s/any
-                             :doc (s/? non-blank-string?)))
+  (when (get @duplicate-keys k)
+    (throw (ex-info "Error duplicate key spec" {:k k})))
+  (swap! duplicate-keys assoc k true)
+  k)
 
 ;; a development helper
 (defn reset-duplicate-keys
   "Empties the duplicate keys atom. Only intended for interactive development."
   [] (reset! duplicate-keys {}))
+
+;; parse out args
+(def def-key-arg-spec (s/cat :k (s/and keyword? namespace)
+                             :spec ::s/any
+                             :doc (s/? non-blank-string?)))
 
 (defmacro def-key
   "Defines a spec via clojure.spec/def, checks for duplicates and adds optional documentation.
@@ -708,9 +699,170 @@ Usage:
               (with-out-str (s/explain def-key-arg-spec args))
               (or (s/explain-data def-key-arg-spec args) {})))
       `(do
-         (s/def (duplicate-key-check* ~k) ~spec)
+         (duplicate-key-check* ~k)
+         (s/def ~k ~spec)
          ~(when doc
             `(add-key-doc ~k ~doc))))))
+
+;; *** keys to document
+;;
+;; this should dispatch and display in file context if there is file
+;; information on the error
+
+;; **** different errors need different strategies
+;; we need to turn un-namespaced keywords in to ns-keywords
+;; for documentation lookup
+
+(defn search-for-key-in-via [via k]
+  (some #(when (or (= (name %) (name k))
+                   (= k %))
+           %) (reverse via)))
+
+(defn get-key-to-document [e]
+  (let [{:keys [via in]} e]
+    (->> (reverse in)
+         (filter keyword?)
+         (some #(search-for-key-in-via via %)))))
+
+#_(get-key-to-document '{:path [:source-paths],
+                       :pred string?,
+                       :val 1,
+                       :via [:fig-opt/build-config :build-config/source-paths :build-config/source-paths],
+                       :in [:source-paths 0],
+                       :strictly-specking.core/error-type :strictly-specking.core/bad-value,
+                       :strictly-specking.core/root-data {},
+                       :strictly-specking.core/file-source "asdf"})
+
+(defn look-up-ns-keywords-in-spec [typ kys]
+  (let [desc (s/describe typ)]
+    (when (or (= (first desc) 'strict-keys)
+              (= (first desc) 'keys))
+      (when-let [ks (not-empty (:keys->specs (apply parse/parse-keys-args (rest desc))))]
+        (keep (fn [k] (if (namespace k) k (get ks k))) kys)))))
+
+(defmulti keys-to-document ::error-type)
+
+(defmethod keys-to-document :default [e]
+  (when-let [k (get-key-to-document e)]
+    [k]))
+
+(defmethod keys-to-document ::unknown-key [e] nil)
+
+(defmethod keys-to-document ::misspelled-key [e] (correct-keys-to-doc e)
+  (when-let [typ (last (:via e))]
+    (look-up-ns-keywords-in-spec typ (when-let [x (::correct-key e)]
+                                       [x]))))
+
+(defmethod keys-to-document ::wrong-key [e] (correct-keys-to-doc e)
+  (when-let [typ (last (:via e))]
+    (look-up-ns-keywords-in-spec typ (when-let [x (::correct-key e)]
+                                       [x]))))
+
+(defmethod keys-to-document ::missing-required-keys [e]
+  (when-let [missing (not-empty (::missing-keys e))]
+    (let [typ  (last (:via e))]
+      (look-up-ns-keywords-in-spec typ missing))))
+
+(comment
+  (keys-to-document '{:path [],
+                      :pred (and (contains? % :id) (contains? % :source-paths)),
+                      :val {:compiler 1, :asdfasdf [1 2]},
+                      :via [:fig-opt/builds :fig-opt/builds :fig-opt/build-config :fig-opt/build-config],
+                      :in [0],
+                      :strictly-specking.core/missing-keys [:id :source-paths],
+                      :strictly-specking.core/error-type :strictly-specking.core/missing-required-keys,
+                      :strictly-specking.core/root-data [{:compiler 1, :asdfasdf [1 2]}],
+                      :strictly-specking.core/file-source "tester.edn"})
+
+  (keys-to-document '{:strictly-specking.core/root-data {},
+                      :path [:misspelled-key :source-path],
+                      :strictly-specking.core/error-type :strictly-specking.core/misspelled-key,
+                      :strictly-specking.core/misspelled-key :source-path,
+                      :pred #{:asdfasdf :source-paths :assert :id},
+                      :via [:fig-opt/build-config],
+                      :val {:id 1, :source-path [1 2]},
+                      :strictly-specking.core/file-source "asdf",
+                      :strictly-specking.core/correct-key :source-paths,
+                      :in []})
+
+  (keys-to-document '{:path (:strictly-specking.core/combined-path [:id :string] [:id :keyword]),
+                      :pred (or string? keyword?),
+                      :val 1,
+                      :via [:fig-opt/build-config :build-config/id],
+                      :in [:id],
+                      :strictly-specking.core/error-type :strictly-specking.core/bad-value-comb-pred,
+                      :strictly-specking.core/root-data {},
+                      :strictly-specking.core/file-source "asdf"})
+  
+  (keys-to-document '{:path [:source-paths],
+                      :pred string?,
+                      :val 1,
+                      :via [:fig-opt/build-config :build-config/source-paths :build-config/source-paths],
+                      :in [:source-paths 0],
+                      :strictly-specking.core/error-type :strictly-specking.core/bad-value,
+                      :strictly-specking.core/root-data {},
+                      :strictly-specking.core/file-source "asdf"})
+  
+  )
+
+(defn fetch-docs [kys]
+  (->>  kys
+       (keep (fn [k] (when-let [d (key-doc k)]
+                       [k d])))
+       (into {})))
+
+;; TODO the raw line data may be more appropirate to ship over
+;; the wire to a client
+(defn error->display-data [error]
+  {:error error
+   :message (error-message error)
+   :error-in-context (with-out-str (pprint-inline-message error))
+   :path (:in error)
+   :doc-keys (keys-to-document error)
+   :docs (not-empty (fetch-docs (keys-to-document error)))})
+
+
+(defn test-print [error-data]
+  (println (color "---------------------------------\n" :header))
+  (println (:message error-data))
+  (println "\n")
+  ;; could should indent this
+  (println (:error-in-context error-data))
+  (println "\n")
+  #_(println "Docs " (prn (:doc-keys error-data)))
+  (when (not-empty (:docs error-data))
+    (println "Docs:\n\n")
+    (doseq [[ky doc] (:docs error-data)]
+      (println (pr-str (keyword (name ky))))
+      (println "\n")
+      (println doc)
+      (println "\n")))
+  (println (color "---------------------------------\n" :footer)))
+
+#_ (prepare-errors (s/explain-data :fig-opt/build-config {:id 1
+                                                          :source-path [1 2]})
+                   {}
+                   "asdf")
+
+(defn dev-print [explain-data data-to-test file-name]
+  (with-ansi
+    (->> 
+     (prepare-errors explain-data data-to-test file-name)
+     (map error->display-data)
+     #_(take 1)
+     (mapv test-print))))
+
+(do #_comment
+  (def structer (read-string (slurp "tester.edn")))
+
+  (def terr (s/explain-data :fig-opt/builds structer))
+
+  (prepare-errors  terr structer "tester.edn")
+  (dev-print terr structer "tester.edn")
+
+  )
+
+
 
 
 
@@ -814,7 +966,7 @@ Usage:
   
   )
 
-#_ (init-test-rules)
+#_(init-test-rules)
 
 
 
