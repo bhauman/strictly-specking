@@ -155,7 +155,6 @@
        (map add-required-keys)
        (map add-error-type)))
 
-
 ;; *** combine errors for single location
 ;; Sometimes there are multiple errors on the same path location
 
@@ -217,6 +216,19 @@
                not-empty)]
       fixed-errs)
     errors))
+
+
+;; *** TODO specific paths filter out general paths if something fails
+;; at a deeper path it takes precedence over and filters out more
+;; general paths this implies that the more general path succeeded in
+;; a certain branch and that path is the one that is failing
+
+(defn specific-paths-filter-general [errors]
+  ;; sort by path length
+  ;; keep the first
+  ;; check it the next is a subpath of the previous
+  
+  )
 
 
 
@@ -395,41 +407,41 @@
   (let [k (last in)]
     (cond
       (parent-map? e)
-      (str "  The key " (color (pr-str k) :focus-key)
+      (str "The key " (color (pr-str k) :focus-key)
            " has the wrong value "
            (color (format-summarized-value val) :bad-value)
-           ".\n  " (format-predicate-str e))
+           ".\n" (format-predicate-str e))
       (parent-coll? e)
-      (str "  The " (parent-type-str e)
+      (str "The " (parent-type-str e)
            " at " (color (pr-str (vec (butlast in))) :focus-path)
            " contains bad value "
            (color (format-summarized-value val) :bad-value)
-           ".\n  " (format-predicate-str e))
+           ".\n" (format-predicate-str e))
       :else
-      (str "  The key " (color (pr-str k) :focus-key)
+      (str "The key " (color (pr-str k) :focus-key)
            " has the wrong value "
            (color (format-summarized-value val) :bad-value)
-           ".\n  " (format-predicate-str e)))))
+           ".\n" (format-predicate-str e)))))
 
 (defmethod error-message ::bad-value [e] (bad-value-message e))
 (defmethod error-message ::bad-value-comb-pred [e] (bad-value-message e))
 
 (defmethod error-message ::should-not-be-empty [{:keys [path pred val reason via in] :as e}]
-  (str "  The value " (color (pr-str val) :bad-value)
+  (str "The value " (color (pr-str val) :bad-value)
        " at key " (color (last in) :focus-key)
-       " should not be empty.\n  "
+       " should not be empty.\n"
        (format-predicate-str (update-in e [:pred] (fn [x] (list '+ x))))))
 
 (defmethod error-message ::unknown-key [{:keys [path pred val reason via in] :as e}]
-  (str "  Found unrecognized key " (color (::unknown-key e) :error-key)
+  (str "Found unrecognized key " (color (::unknown-key e) :error-key)
        " at path " (color (pr-str in) :focus-path) "\n"
-       "  Must be one of: " (format-seq-with-or pred)))
+       "Must be one of: " (format-seq-with-or pred)))
 
 (defmethod error-message ::missing-required-keys [{:keys [path pred val reason via in] :as e}]
   (when-let [kys (not-empty (::missing-keys e))]
     (if (< 1 (count kys))
-      (str "  Missing required keys " (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path))
-      (str "  Missing required key "  (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path)))))
+      (str "Missing required keys " (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path))
+      (str "Missing required key "  (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path)))))
 
 ;; *** TODO ::wrong-key
 ;; upon reflection misspelling and wrong keys should have multiple options for correction
@@ -437,7 +449,7 @@
 ;; but the scores of the top choices should be close and in order 
 
 (defmethod error-message ::wrong-key [{:keys [path pred val reason via in] :as e}]
-  (str "  The key " (color (::wrong-key e) :error-key)
+  (str "The key " (color (::wrong-key e) :error-key)
        " is unrecognized. Perhaps you meant "
        (color (::correct-key e) :correct-key)
        "?"))
@@ -447,7 +459,7 @@
 ;; we probably should move ::correct-key to ::correct-keys
 
 (defmethod error-message ::misspelled-key [{:keys [path pred val reason via in] :as e}]
-  (str "  The key " (color (::misspelled-key e) :error-key)
+  (str "The key " (color (::misspelled-key e) :error-key)
        " is misspelled. It should probably be "
        (color (::correct-key e) :correct-key)))
 
@@ -483,9 +495,15 @@
 
 ;; *** use pprint to print contextual errors
 
+(defn indent-lines [n s]
+  (->> (string/split s #"\n")
+       (map #(str (cp/blanks n) %))
+       (string/join "\n")))
+
 (defn pprint-sparse-path
   ([data path key-message-map colors]
-   (pp/with-pprint-dispatch annot/error-path-dispatch
+   (->>
+    (pp/with-pprint-dispatch annot/error-path-dispatch
      (pp/pprint
       (annot/annotate-path-only
        data
@@ -499,7 +517,10 @@
                                         :comment-colors [:pointer]
                                         :comment message}
                                        colors)])
-                             key-message-map))}))))
+                             key-message-map))})))
+    with-out-str
+    (indent-lines 2)
+    println))
   ([data path key-message-map]
    (pprint-sparse-path data path key-message-map {})))
 
@@ -513,7 +534,7 @@
         path        (conj (vec base-path) k)]
     (when-let [{:keys [line column value path loc]}
                (edn-string-nav/get-path-in-clj-file path file)]
-      (println "  File:" (str file))
+      (println "File:" (str file))
       (cp/print-message-in-context-of-file file line column message)
       true)))
 
@@ -554,8 +575,13 @@
                      {(::wrong-key e) (inline-message e)}))
 
 (defn pprint-missing-keys-context [e]
-  (pprint-sparse-path (reduce #(assoc-in %1 (conj (vec (:in e)) %2)
-                                         '...)
+  (pprint-sparse-path (reduce #(update-in %1 (vec (:in e))
+                                          (fn [x]
+                                            ;; order matters for display purposes
+                                            (->> x
+                                                 seq
+                                                 (cons [%2 '...])
+                                                 (into {}))))
                               (::root-data e)
                               (::missing-keys e))
                       (:in e)
@@ -592,7 +618,7 @@
     (if-let [{:keys [line column value path loc]}
              (inline-missing-keys? e)]
       (do
-        (println "  File:" (str (::file-source e)))
+        (println "File:" (str (::file-source e)))
         (-> (cp/fetch-lines (::file-source e))
             (cp/number-lines)
             (cp/insert-message line column
@@ -618,7 +644,7 @@
 
 (defmethod pprint-inline-message ::missing-required-keys [e]
   (or
-   (pprint-missing-keys-in-file-context e)
+   (and (::file-source e) (pprint-missing-keys-in-file-context e))
    (pprint-missing-keys-context e)))
 
 ;; * docs on keys
@@ -831,10 +857,8 @@ Usage:
   (println "\n")
   #_(println "Docs " (prn (:doc-keys error-data)))
   (when (not-empty (:docs error-data))
-    (println "Docs:\n\n")
     (doseq [[ky doc] (:docs error-data)]
-      (println (pr-str (keyword (name ky))))
-      (println "\n")
+      (println "-- Docs for key" (pr-str (keyword (name ky)))"--")
       (println doc)
       (println "\n")))
   (println (color "---------------------------------\n" :footer)))
@@ -857,8 +881,8 @@ Usage:
 
   (def terr (s/explain-data :fig-opt/builds structer))
 
-  (prepare-errors  terr structer "tester.edn")
-  (dev-print terr structer "tester.edn")
+  #_(prepare-errors  terr structer "tester.edn")
+  (dev-print terr structer nil #_"tester.edn")
 
   )
 

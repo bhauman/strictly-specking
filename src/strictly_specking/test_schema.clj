@@ -12,7 +12,7 @@
 
 (def-key ::string-or-symbol (some-fn non-blank-string? symbol?))
 
-(def-key ::string-or-named (some-fn non-blank-string? keyword? symbol?))
+(def-key ::string-or-named  (some-fn non-blank-string? keyword? symbol?))
 
 #_(s/conform ::string-or-named :asdfasdf)
 
@@ -266,7 +266,7 @@ Or you can specify which suffixes will cause the reloading
 ;; it also can be found at the top level of a figwheel.edn file
 
 (def-key ::builds 
-  (s/or
+  (s/or                               ;; wait until merge works
    :builds-vector (s/+ ::build-config-require-id)
    :builds-map    (s/map-of ::string-or-named ::build-config))
   "A Vector or Map of ClojureScript Build Configurations.
@@ -316,7 +316,7 @@ Or you can specify which suffixes will cause the reloading
 
 (def-key ::build-config-require-id
   (s/and
-   ::build-config
+   ::build-config 
    (s/keys
     :req-un [::id]))
   
@@ -530,7 +530,7 @@ Default: nil (disabled)
 (def-key :figwheel.lein-project.require-builds/figwheel
   :figwheel.lein-project/figwheel
   ;; wait for merge to not propogate conformed values
-  #_(s/and
+  #_(s/merge
 
    (s/keys
     :req-un [::builds])))
@@ -572,12 +572,11 @@ Example figwheel.edn file
    :opt-un [::figwheel-options
             ::build-ids]))
 
-
 (comment
   (def test-data
     { :cljsbuild {
-                  :builds [{:id "example-admin"
-                            :source-path ["src" "dev" "tests" "../support/src"]
+                  :build [{:id "example-admin"
+                            :source-paths ["src" "dev" "tests" "../support/src"]
                             :notify-command ["notify"]
                             :assert true
                             :figwheel
@@ -624,7 +623,7 @@ Example figwheel.edn file
                                        :optimizations :none}}]}})
 
   (ss/dev-print (s/explain-data ::lein-project-with-cljsbuild
-                           test-data)
+                                test-data)
                 test-data
                 nil)
   
