@@ -16,6 +16,11 @@
 
 #_(s/conform ::string-or-named :asdfasdf)
 
+
+
+#_(s/explain (s/every string? :min-count 1 :into [] :kind vector?)
+           {:asdf 1})
+
 ;; * Figwheel Configuration
 
 ;; ** In the Leiningen project.clj
@@ -85,7 +90,10 @@ Default: \"localhost\"
 
   :server-ip \"0.0.0.0\"")
 
-(def-key ::css-dirs          (s/+ string?)
+(def-key ::css-dirs  (s/every non-blank-string?
+                              :min-count 1
+                              :into []
+                              :kind sequential?)
 
   "A vector of paths from the project root to the location of your css
 files. These files will be watched for changes and the figwheel client
@@ -103,7 +111,10 @@ Default: Off
   :ring-handler example.core/my-server-handler")
 
 ;; co-dependency - needs to be in builds
-(def-key ::builds-to-start   (s/* ::string-or-named)
+(def-key ::builds-to-start (s/every ::string-or-named
+                                    :min-count 1
+                                    :into []
+                                    :kind sequential?)
 
   "A vector of build ids that you would like figwheel to start building
 when you invoke lein figwheel without arguments.
@@ -148,7 +159,7 @@ specifies which local network interface you want to launch the server on.
 
   :nrepl-host \"localhost\"")
 
-(def-key ::nrepl-middleware  (s/+ ::string-or-named)
+(def-key ::nrepl-middleware  (s/every ::string-or-named :min-count 1 :into [] :kind sequential?)
 
   "A vector of strings indicating the nREPL middleware you want included
 when nREPL launches.
@@ -183,7 +194,7 @@ to false.  Default: true
 
   :ansi-color-output false")
 
-(def-key ::hawk-options (s/map-of #{:watcher} #{:barbary :java :polling})
+(def-key ::hawk-options (ss/map-of #{:watcher} #{:barbary :java :polling})
 
   "If you need to watch files with polling instead of FS events. This can
 be useful for certain docker environments.
@@ -196,11 +207,10 @@ be useful for certain docker environments.
    :suffix-map
    (strict-keys
     :opt-un
-    [::clj
-     ::cljs]))
-  
-  "Figwheel naively reloads clj and cljc files on the :source-paths.  
-It doesn't reload clj dependent files like tools.namspace. 
+    [::clj ::cljs]))
+
+  "Figwheel naively reloads clj and cljc files on the :source-paths.
+It doesn't reload clj dependent files like tools.namspace.
 
 Figwheel does note if there is a macro in the changed clj or cljc file
 and then marks any cljs namespaces that depend on the clj file for
@@ -209,7 +219,7 @@ namespaces have changed.
 
 If there is no macro in the clj/cljc namespace figwheel marks all cljs files
 for recompilation.
-  
+
 If you want to disable this behavior:
 
   :reload-clj-files false
@@ -253,10 +263,14 @@ Or you can specify which suffixes will cause the reloading
 ;; spec out other lein cljsbuild options to provide comprehensive
 ;; configuration validation
 (def-key ::repl-listen-port      integer?)
-(def-key ::repl-launch-commands  (s/map-of ::string-or-named (s/* ::string-or-named)))
-(def-key ::test-commands         (s/map-of ::string-or-named (s/* ::string-or-named)))
-(def-key ::crossovers            (s/* ::s/any))
-(def-key ::crossover-path        (s/* ::s/any))
+(def-key ::repl-launch-commands
+  (ss/map-of ::string-or-named
+            (s/every ::string-or-named :into [] :kind sequential?)))
+(def-key ::test-commands
+  (ss/map-of ::string-or-named
+            (s/every ::string-or-named :into [] :kind sequential?)))
+(def-key ::crossovers            (s/every ::s/any :into [] :kind sequential?))
+(def-key ::crossover-path        (s/every ::s/any :into [] :kind sequential?))
 (def-key ::crossover-jar         boolean?)
 
 ;; If :cljsbuild > :builds is not present you must have :figwheel > :builds
@@ -265,10 +279,10 @@ Or you can specify which suffixes will cause the reloading
 ;; ::build-configs. Again it can be placed under :cljsbuild or :figwheel
 ;; it also can be found at the top level of a figwheel.edn file
 
-(def-key ::builds 
+(def-key ::builds
   (s/or                               ;; wait until merge works
-   :builds-vector (s/+ ::build-config-require-id)
-   :builds-map    (s/map-of ::string-or-named ::build-config))
+   :builds-vector (s/every ::build-config-require-id :min-count 1 :into [] :kind sequential?)
+   :builds-map  (ss/non-empty-map-of ::string-or-named ::build-config))
   "A Vector or Map of ClojureScript Build Configurations.
 
   :builds [{:id \"dev\"
@@ -316,10 +330,9 @@ Or you can specify which suffixes will cause the reloading
 
 (def-key ::build-config-require-id
   (s/and
-   ::build-config 
-   (s/keys
-    :req-un [::id]))
-  
+   ::build-config
+   #(contains? % :id))
+
   "A Map of options that specifies a ClojureScript 'build'
 
   {:id \"dev\"
@@ -338,7 +351,7 @@ Or you can specify which suffixes will cause the reloading
 
   :id \"dev\"")
 
-(def-key ::source-paths     (s/+ string?)
+(def-key ::source-paths (s/every non-blank-string? :min-count 1 :into [] :kind sequential?)
 
   "A vector of paths to your cljs source files. These paths should be
 relative from the root of the project to the root the namespace.
@@ -379,15 +392,15 @@ want the figwheel client code to be injected into the build.
 
 (def-key ::compiler ::strictly-specking.cljs-options-schema/compiler-options
   "The options to be forwarded to the ClojureScript Compiler
-  
-Please refer to   
+
+Please refer to
 
   :compiler {:main example.core
              :asset-path \"js/out\"
              :output-to \"resources/public/example.js\"
              :output-dir \"resources/public/out\"}")
 
-(def-key ::notify-command   (s/+ string?)
+(def-key ::notify-command   (s/every non-blank-string? :min-count 1 :into [] :kind sequential?)
 
   "If a :notify-command is specified, it will be called when compilation
 succeeds or fails, and a textual description of what happened will be
@@ -404,7 +417,7 @@ Default: nil (disabled)
 (def-key ::jar              boolean?)
 (def-key ::incremental      boolean?)
 (def-key ::assert           boolean?)
-(def-key ::warning-handlers (s/+ ::s/any))
+(def-key ::warning-handlers (s/every ::s/any :min-count 1 :into [] :kind sequential?))
 
 ;; **** Figwheel Client Options
 
@@ -419,7 +432,7 @@ Default: nil (disabled)
 
 (def-key ::websocket-host (s/or :string non-blank-string?
                                 :host-option #{:js-client-host :server-ip :server-hostname})
-  
+
  "A String specifying the host part of the Figwheel websocket URL. If you have
 JavaScript clients that need to access Figwheel that are not local, you can
 supply the IP address of your machine here, or you can specify one of the
@@ -431,7 +444,72 @@ Default: \"localhost\"
 
   :websocket-host :server-ip")
 
-(def-key ::websocket-url        non-blank-string?)
+;; **** TODO we can detect malformed and misspelled tags ... fun!!!
+
+(comment
+  (defmacro str-regex [s]
+  `(s/cat ~@(apply
+             concat
+             (map-indexed
+              (fn [i a]
+                [(keyword (str "ch" i))
+                 (set (vector a))])
+              s))))
+
+  (s/def ::url-tag (s/cat
+                 :open-brackets  (str-regex "[[")
+                 :tag-name (s/alt
+                            :server-hostname (str-regex "server-hostname")
+                            :server-ip (str-regex "server-ip")
+                            :server-port (str-regex "server-port")
+                            :client-hostname (str-regex "client-hostname")
+                            :client-port (str-regex "client-port"))
+                 :close-brackets (str-regex "]]")))
+
+  (def host-alpha (let [alpha "abcdefghikjlmnopqrstuvwxyz"]
+                    (set (str alpha (clojure.string/upper-case alpha) "0123456789" ".-"))))
+
+  (s/def ::hostname (s/+ host-alpha))
+
+  (s/explain-data (s/cat :protocol
+                         (s/cat :ws (str-regex "ws") :secure-s (s/? #{\s}))
+                         :colon #{\:}
+                         :slashes (str-regex "//")
+                         :tag ::url-tag
+                         ) (seq "ws://[[server-host"))
+
+)
+
+#_(s/explain (s/cat :a #{\w} :b #{\s} :c (s/? #{\s})
+                  :e #{\:}
+                  :d #{\/} :f #{\/})
+           (seq "ws:/"))
+
+
+
+(def-key ::websocket-url        non-blank-string?
+
+  "You can override the websocket url that is used by the figwheel client
+by specifying a :websocket-url
+
+The value of :websocket-url is usually
+  :websocket-url \"ws://localhost:3449/figwheel-ws\"
+
+The :websocket-url is normally derived from the :websocket-host option.
+If you supply a :websocket-url the :websocket-host option will be ignored.
+
+The :websocket-url allows you to use tags for common dynamic values.
+For example in:
+  :websocket-url \"ws://[[client-hostname]]:[[server-port]]/figwheel-ws\"
+
+Figwheel will fill in the [[client-hostname]] and [[server-port]] tags
+
+Available tags are:
+  [[server-hostname]] ;; supplies the detected server hostname
+  [[server-ip]]       ;; supplies the detected server ip
+  [[server-port]]     ;; supplies the figwheel server port
+  [[client-hostname]] ;; supplies the current hostname on the client
+  [[client-port]]     ;; supplies the current hostname on the client")
 
 (def-key ::on-jsload            ::string-or-named
 
@@ -457,7 +535,7 @@ Default: false
 
   :load-warninged-code true")
 
-(def-key ::open-urls            (s/+ string?)
+(def-key ::open-urls   (s/every non-blank-string? :min-count 1 :into [] :kind sequential?)
 
   "A Vector of URLs that you would like to have opened at the end of the
 initial compile. These URLs must be Strings.
@@ -520,26 +598,21 @@ Default: nil (disabled)
    :req-un [:cljsbuild.lein-project/cljsbuild]))
 
 (def-key :cljsbuild.lein-project.require-builds/cljsbuild
-  :cljsbuild.lein-project/cljsbuild
-  ;; wait for merge to not propogate conformed values
-  #_(s/merge
-     
-     (s/keys
-      :req-un [::builds])))
+  (s/and
+   :cljsbuild.lein-project/cljsbuild
+   #(contains? % :builds)))
 
 (def-key :figwheel.lein-project.require-builds/figwheel
-  :figwheel.lein-project/figwheel
   ;; wait for merge to not propogate conformed values
-  #_(s/merge
-
-   (s/keys
-    :req-un [::builds])))
+  (s/and
+   :figwheel.lein-project/figwheel
+   #(contains? % :builds)))
 
 ;; ** figwheel.edn
 
 (def-key ::figwheel-edn :figwheel.lein-project.require-builds/figwheel
   "If a figwheel.edn file is present at the root of your directory
-figwheel will use this file as a configuration source. 
+figwheel will use this file as a configuration source.
 
 The structure of the EDN in figwheel.edn file is the same as the
 structure of the top level :figwheel key in the project.clj
@@ -557,14 +630,14 @@ Example figwheel.edn file
                              :output-to \"resources/public/example.js\"
                              :output-dir \"resources/public/out\"}}}}")
 
-;; ** Figwheel Internal 
+;; ** Figwheel Internal
 
 ;; co-dependency - must exist in all-builds
-(def-key ::build-ids        (s/* ::string-or-named))
+(def-key ::build-ids  (s/every ::string-or-named :into [] :kind sequential?))
 
 (def-key ::figwheel-options :figwheel.lein-project/figwheel)
 
-(def-key ::all-builds       (s/+ ::build-config-require-id))
+(def-key ::all-builds (s/every ::build-config-require-id :min-count 1 :into [] :kind sequential?))
 
 (def-key ::figwheel-internal-config
   (strict-keys
@@ -575,67 +648,141 @@ Example figwheel.edn file
 (comment
   (def test-data
     { :cljsbuild {
-                  :build [{:id "example-admin"
-                            :source-paths ["src" "dev" "tests" "../support/src"]
-                            :notify-command ["notify"]
-                            :assert true
-                            :figwheel
-                            {:websocket-host "localhost"
-                             :on-jsload      'example.core/fig-reload
-                             :on-message     'example.core/on-message
-                             :open-urls ["http://localhost:3449/index.html"
-                                         "http://localhost:3449/index.html"
-                                         "http://localhost:3449/index.html"
-                                         "http://localhost:3449/index.html"
-                                         "http://localhost:3449/index.html"]
-                             :debug true
-                             }
-                            
-                            :compiler { :main 'example.core
-                                       :asset-path "js/out"
-                                       :output-to "resources/public/js/example.js"
-                                       :output-dir "resources/public/js/out"
-                                       :libs ["libs_src" "libs_sscr/tweaky.js"]
-                                       ;; :externs ["foreign/wowza-externs.js"]
-                                       :foreign-libs [{:file "foreign/wowza.js"
-                                                       :provides ["wowzacore"]}]
-                                       ;; :recompile-dependents true
-                                       :optimizations :none}}
-                           { :id "example"
-                            :source-paths ["src" "dev" "tests" "../support/src"]
-                            :notify-command ["notify"]
-                            :figwheel
-                            { :websocket-host "localhost"
-                             :on-jsload      'example.core/fig-reload
-                             :on-message     'example.core/on-message
-                             :open-urls ["http://localhost:3449/index.html"]
-                             :debug true
-                             }
-                            :compiler { :main 'example.core
-                                       :asset-path "js/out"
-                                       :output-to "resources/public/js/example.js"
-                                       :output-dir "resources/public/js/out"
-                                       :libs ["libs_src" "libs_sscr/tweaky.js"]
-                                   ;; :externs ["foreign/wowza-externs.js"]
-                                       :foreign-libs [{:file "foreign/wowza.js"
-                                                       :provides ["wowzacore"]}]
-                                       ;; :recompile-dependents true
-                                       :optimizations :none}}]}})
+                  :builds {:dev {:id "example-admin"
+                                 :asdfasdfasdf ["src" "dev" "tests" "../support/src"]
+                                 ;:notify-command ["notify"]
+                                 :assert true
+                                 :figwheel
+                                 {:websocket-host "localhost"
+                                  :on-jsload      'example.core/fig-reload
+                                  :on-message     'example.core/on-message
+                                  :open-urls ["http://localhost:3449/index.html"
+                                              "http://localhost:3449/index.html"
+                                              "http://localhost:3449/index.html"
+                                              "http://localhost:3449/index.html"
+                                                          "http://localhost:3449/index.html"]
+                                  :debug true
+                                  }
+                           
+                                 :compiler { :main 'example.core
+                                            :asset-path "js/out"
+                                            :output-to "resources/public/js/example.js"
+                                            :output-dir "resources/public/js/out"
+                                            :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                            ;; :externs ["foreign/wowza-externs.js"]
+                                            :foreign-libs [{:file "foreign/wowza.js"
+                                                            :provides ["wowzacore"]}]
+                                            ;; :recompile-dependents true
+                                            :optimizations :none}}
+                           #_:asdf1 #_{:id "example-admin"
+                                 :source-paths
+                                 ["src" "dev" "tests" "../support/src"]
+                                 :notify-command 3 #_["notify"]
+                                 :assert true
+                                 :figwheel
+                                 {:websocket-host "localhost"
+                                  :on-jsload      'example.core/fig-reload
+                                  :on-message     'example.core/on-message
+                                  :open-urls ["http://localhost:3449/index.html"
+                                              "http://localhost:3449/index.html"
+                                              "http://localhost:3449/index.html"
+                                              "http://localhost:3449/index.html"
+                                                          "http://localhost:3449/index.html"]
+                                  :debug true
+                                  }
+                           
+                                 :compiler { :main 'example.core
+                                            :asset-path "js/out"
+                                            :output-to "resources/public/js/example.js"
+                                            :output-dir "resources/public/js/out"
+                                            :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                            ;; :externs ["foreign/wowza-externs.js"]
+                                            :foreign-libs [{:file "foreign/wowza.js"
+                                                            :provides ["wowzacore"]}]
+                                            ;; :recompile-dependents true
+                                            :optimizations :none}}
+                           } #_[{:id "example-admin"
+                                 :source-paths
+                                 ["src" "dev" "tests" "../support/src"]
+                                 :notify-command :Asdfasdf #_["notify"]
+                                 :assert true
+                                 :figwheel
+                                 {:websocket-host "localhost"
+                                  :on-jsload      'example.core/fig-reload
+                                  :on-message     'example.core/on-message
+                                  :open-urls {:Asdf 1} #_[1"http://localhost:3449/index.html"
+                                                          "http://localhost:3449/index.html"
+                                                          "http://localhost:3449/index.html"
+                                                          "http://localhost:3449/index.html"
+                                                          "http://localhost:3449/index.html"]
+                                  :debug true
+                                  }
+                           
+                                 :compiler { :main 'example.core
+                                            :asset-path "js/out"
+                                            :output-to "resources/public/js/example.js"
+                                            :output-dir "resources/public/js/out"
+                                            :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                            ;; :externs ["foreign/wowza-externs.js"]
+                                            :foreign-libs [{:file "foreign/wowza.js"
+                                                            :provides ["wowzacore"]}]
+                                            ;; :recompile-dependents true
+                                            :optimizations :none}}
+                           
+
+                                { :id "example"
+                                 :source-paths ["src" "dev" "tests" "../support/src"]
+                                 :notify-command ["notify"]
+                                 :figwheel
+                                 { :websocket-host "localhost"
+                                  :on-jsload      'example.core/fig-reload
+                                  :on-message     'example.core/on-message
+                                  :open-urls ["http://localhost:3449/index.html"]
+                                  :debug true
+                                  }
+                                 :compiler { :main 'example.core
+                                            :asset-path "js/out"
+                                            :output-to "resources/public/js/example.js"
+                                            :output-dir "resources/public/js/out"
+                                            :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                            ;; :externs ["foreign/wowza-externs.js"]
+                                            :foreign-libs [{:file "foreign/wowza.js"
+                                                            :provides ["wowzacore"]}]
+                                            ;; :recompile-dependents true
+                                            :optimizations :none}}]}})
 
   (ss/dev-print (s/explain-data ::lein-project-with-cljsbuild
                                 test-data)
                 test-data
                 nil)
+
+#_(ss/prepare-errors (s/explain-data (ss/non-empty-map-of keyword? (ss/map-of keyword? integer?))
+                                   {})
+                   {}
+                   nil)
   
+  (first (ss/prepare-errors (s/explain-data ::lein-project-with-cljsbuild
+                                     test-data)
+                     test-data
+                     nil))
+ 
+  )
+
+
+
+(comment
+
+
+
   (s/explain ::lein-project-with-cljsbuild
              test-data)
 
-  (s/explain ::build-config-require-id (get-in test-data [:cljsbuild :builds 0]))
+  (s/explain ::build-config (get-in test-data [:cljsbuild :builds 0]))
 
   (s/def ::string  (s/or :string string?))
-  
+
   (s/def ::myid ::string)
-  
+
   (s/explain (s/merge
               (s/keys :opt-un [::myid])
               (s/spec (fn [x] (prn x) true))
@@ -648,6 +795,4 @@ Example figwheel.edn file
                         true))
               )
              5)
-  
   )
-

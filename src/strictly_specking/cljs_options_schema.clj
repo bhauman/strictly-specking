@@ -34,7 +34,7 @@
 ;; Commented out configs are more obvious than no-op ones.
 
 (def-key ::output-to non-blank-string?
-  
+
   "After your ClojureScript has been compiled to JavaScript, this
 specifies the name of the JavaScript output file.  The contents of
 this file will differ based on the :optimizations setting.
@@ -49,7 +49,7 @@ output file will contain all the compiled code.
   :output-to \"resources/public/js/main.js\"")
 
 (def-key ::output-dir non-blank-string?
-  
+
   "Sets the output directory for output files generated during
 compilation.
 
@@ -58,13 +58,13 @@ Defaults to  \"out\".
   :output-dir \"resources/public/js/out\"")
 
 (def-key ::optimizations #{:none :whitespace :simple :advanced}
-  
+
   "The optimization level. May be :none, :whitespace, :simple, or
 :advanced. Only :none and :simple are supported for bootstrapped
 ClojureScript.
 
   :none is the recommended setting for development
-  
+
   :advanced is the recommended setting for production, unless
         something prevents it (incompatible external library, bug,
         etc.).
@@ -80,7 +80,7 @@ Defaults to :none. Note: lein cljsbuild 1.0.5 will supply :whitespace.
   :optimizations :none")
 
 (def-key ::main                      ::string-or-symbol
-  
+
   "Specifies an entry point namespace. When combined with optimization
 level :none, :main will cause the compiler to emit a single JavaScript
 file that will import goog/base.js, the JavaScript file for the
@@ -92,7 +92,7 @@ Also see :asset-path.
   :main \"example.core\"")
 
 (def-key ::asset-path                string?
-  
+
   "When using :main it is often necessary to control where the entry
 point script attempts to load scripts from due to the configuration of
 the web server. :asset-path is a relative URL path not a file system
@@ -103,8 +103,8 @@ scripts from \"js/compiled/out\".
 
   :asset-path \"js/compiled/out\"")
 
-(def-key ::source-map                (s/or :bool boolean? :string non-blank-string?)
-  
+(def-key ::source-map                (some-fn boolean? non-blank-string?)
+
   "See https://github.com/clojure/clojurescript/wiki/Source-maps. Under
 optimizations :none the valid values are true and false, with the
 default being true. Under all other optimization settings must specify
@@ -114,8 +114,8 @@ Under :simple, :whitespace, or :advanced
   :source-map \"path/to/source/map.js.map\"")
 
 
-(def-key ::preloads                  (s/+ symbol?)
-  
+(def-key ::preloads                  (s/every symbol? :min-count 1 :into [] :kind sequential?)
+
   "Developing ClojureScript commonly requires development time only
 side effects such as enabling printing, logging, spec instrumentation,
 and connecting REPLs. :preloads permits loading such side effect
@@ -137,20 +137,20 @@ The :preloads config value must be a sequence of symbols that map to
 existing namespaces discoverable on the classpath.")
 
 (def-key ::verbose                   boolean?
-  
+
   "Emit details and measurements from compiler activity.
 
   :verbose true")
 
 (def-key ::pretty-print              boolean?
-  
+
   "Determines whether the JavaScript output will be tabulated in a
 human-readable manner. Defaults to true.
 
   :pretty-print false")
 
 (def-key ::target                    #{:nodejs}
-  
+
   "If targeting nodejs add this line. Takes no other options at the
 moment. The default (no :target specified) implies browsers are being
 targeted. Have a look here for more information on how to run your
@@ -158,15 +158,17 @@ code in nodejs.
 
   :target :nodejs")
 
-(def-key ::foreign-libs (s/*
+(def-key ::foreign-libs (s/every
                          (strict-keys
                           :req-un [::file
                                    ::provides]
                           :opt-un [::file-min
                                    ::requires
                                    ::module-type
-                                   ::preprocess]))
-  
+                                   ::preprocess])
+                         :into []
+                         :kind sequential?)
+
   "Adds dependencies on foreign libraries. Be sure that the url returns a
 HTTP Code 200
 
@@ -182,12 +184,12 @@ keys have these semantics:
 
   :file-min (Optional) Indicates the URL to the minified variant of
             the library.
-  
+
   :provides A synthetic namespace that is associated with the library.
             This is typically a vector with a single string, but it
             has the capability of specifying multiple namespaces
             (typically used only by Google Closure libraries).
-  
+
   :requires (Optional) A vector explicitly identifying dependencies
             (:provides values from other foreign libs); used to form a
             topological sort honoring dependencies.
@@ -196,7 +198,7 @@ keys have these semantics:
                module system. Can be one of :commonjs, :amd, :es6.
                Note that if supplied, :requires is not used (as it is
                implicitly determined).
-  
+
   :preprocess (Optional) Used to preprocess / transform code in other
               dialects (JSX, etc.). A defmethod for
               cljs.clojure/js-transforms must be provided that matches
@@ -204,14 +206,14 @@ keys have these semantics:
               transformation.")
 
 (def-key ::file        non-blank-string?)
-(def-key ::provides    (s/+ non-blank-string?))
+(def-key ::provides    (s/every non-blank-string? :min-count 1 :into [] :kind sequential?))
 (def-key ::file-min    non-blank-string?)
-(def-key ::requires    (s/+ non-blank-string?))
+(def-key ::requires    (s/every non-blank-string? :min-count 1 :into [] :kind sequential?))
 (def-key ::module-type #{:commonjs :amd :es6})
 (def-key ::preprocess  ::string-or-named)
 
-(def-key ::externs                    (s/+ non-blank-string?)
-  
+(def-key ::externs     (s/every non-blank-string? :min-count 1 :into [] :kind sequential?)
+
   "Configure externs files for external libraries.
 
 For this option, and those below, you can find a very good explanation at:
@@ -227,7 +229,7 @@ Defaults to the empty vector [].
                      :req-un [:cljs.options-schema.modules/output-dir
                               ::entries]
                      :opt-un [::depends-on]))
-  
+
   "A new option for emitting Google Closure Modules. Closure Modules
 supports splitting up an optimized build into N different modules. If
 :modules is supplied it replaces the single :output-to. A module needs
@@ -240,14 +242,14 @@ optimizations. An example follows:
    :source-map true
    :output-dir \"resources/public/js\"
    :modules {
-     :common 
-       {:output-to \"resources/public/js/common.js\"  
+     :common
+       {:output-to \"resources/public/js/common.js\"
         :entries #{\"com.foo.common\"}}
-     :landing 
-       {:output-to \"resources/public/js/landing.js\" 
+     :landing
+       {:output-to \"resources/public/js/landing.js\"
         :entries #{\"com.foo.landing\"}
         :depends-on #{:common}}
-     :editor 
+     :editor
        {:output-to \"resources/public/js/editor.js\"
         :entries #{\"com.foo.editor\"}
         :depends-on #{:common}}}}
@@ -274,10 +276,10 @@ each module. Just supply :source-map true (see example) as there is no
 single source map to name.")
 
 ;; ** TODO name collision don't want docs to collide
-;; this is the only name collision in this 
-(def-key :cljs.options-schema.modules/output-dir    non-blank-string?) 
-(def-key ::entries       (s/+ non-blank-string?))
-(def-key ::depends-on    (s/+ ::string-or-named))
+;; this is the only name collision in this
+(def-key :cljs.options-schema.modules/output-dir    non-blank-string?)
+(def-key ::entries       (s/every non-blank-string? :min-count 1 :into [] :kind sequential?))
+(def-key ::depends-on    (s/every ::string-or-named :min-count 1 :into [] :kind sequential?))
 
 (def-key ::source-map-path            string?
 
@@ -286,7 +288,7 @@ further web server configuration.
 
   :source-map-path \"public/js\"")
 
-(def-key ::source-map-timestamp       boolean? 
+(def-key ::source-map-timestamp       boolean?
 
   "Add cache busting timestamps to source map urls. This is helpful for
 keeping source maps up to date when live reloading code.
@@ -366,7 +368,7 @@ globals. Defaults to false.
 
   :output-wrapper false")
 
-(def-key ::libs                       (s/+ string?)
+(def-key ::libs  (s/every string? :min-count 1 :into [] :kind sequential?)
 
   "Adds dependencies on external js libraries, i.e. Google
 Closure-compatible javascript files with correct goog.provides() and
@@ -382,7 +384,7 @@ Defaults to the empty vector []
          \"src/js\"
          \"src/org/example/example.js\"]")
 
-(def-key ::preamble                   (s/+ non-blank-string?)
+(def-key ::preamble  (s/every non-blank-string? :min-count 1 :into [] :kind sequential?)
 
   "Prepends the contents of the given files to each output file. Only
 valid with optimizations other than :none.
@@ -408,7 +410,12 @@ Defaults to false.
 
   :compiler-stats true")
 
-(def-key ::language-in                #{:ecmascript3 :ecmascript5 :ecmascript5-strict}
+(s/def ::closure-language-in-out-opts
+  #{:ecmascript3 :ecmascript5 :ecmascript5-strict
+    :ecmascript6 :ecmascript6-typed :ecmascript6-strict
+    :no-transpile})
+
+(def-key ::language-in         ::closure-language-in-out-opts
 
   "Configure the input and output languages for the closure library. May
 be :ecmascript3, ecmascript5, ecmascript5-strict, :ecmascript6-typed,
@@ -418,7 +425,7 @@ Defaults to :ecmascript3
 
   :language-in  :ecmascript3")
 
-(def-key ::language-out               #{:ecmascript3 :ecmascript5 :ecmascript5-strict}
+(def-key ::language-out        ::closure-language-in-out-opts
 
   "Configure the input and output languages for the closure library. May
 be :ecmascript3, ecmascript5, ecmascript5-strict, :ecmascript6-typed,
@@ -430,9 +437,9 @@ Defaults to :ecmascript3
 
 (def-key ::closure-defines (s/map-of
                             ::string-or-symbol
-                            (s/or :number number?
-                                  :string non-blank-string?
-                                  :bool   boolean?))
+                            (some-fn number?
+                                     non-blank-string?
+                                     boolean?))
 
   "Set the values of Closure libraries' variables annotated with @define
 or with the cljs.core/goog-define helper macro. A common usage is
@@ -450,7 +457,8 @@ For :optimization :none, a :main option must be specified for defines
 to work, and only goog-define defines are affected. :closure-defines
 currently does not have any effect with :optimization :whitespace.")
 
-(def-key ::closure-extra-annotations  (s/+ non-blank-string?)
+(def-key ::closure-extra-annotations
+  (s/every non-blank-string? :min-count 1 :into [] :kind sequential?)
 
   "Define extra JSDoc annotations that a closure library might use so
 that they don't trigger compiler warnings.
@@ -468,11 +476,11 @@ declarations. Defaults to :off.
 The following values are supported:
 
   :off Don't give anonymous functions names.
-  
+
   :unmapped Generates names that are based on the left-hand side of
             the assignment. Runs after variable and property renaming,
             so that the generated names will be short and obfuscated.
-  
+
   :mapped Generates short unique names and provides a mapping from
           them back to a more meaningful name that's based on the
           left-hand side of the assignment.")
@@ -509,11 +517,15 @@ Only available for cljs.build.api/watch
 
 (def-key ::dump-core                  boolean?)
 (def-key ::emit-constants             boolean?)
-(def-key ::warning-handlers           (s/+ ::s/any)) ;; symbol, string, or fn?
+(def-key ::warning-handlers  ;; symbol, string, or fn?
+  (s/every ::s/any :min-count 1 :into [] :kind sequential?))
 (def-key ::source-map-inline          boolean?)
-(def-key ::ups-libs                   (s/+ non-blank-string?))
-(def-key ::ups-externs                (s/+ non-blank-string?))
-(def-key ::ups-foreign-libs           (s/+ ::foreign-libs))
+(def-key ::ups-libs
+  (s/every non-blank-string? :min-count 1 :into [] :kind sequential?))
+(def-key ::ups-externs
+  (s/every non-blank-string? :min-count 1 :into [] :kind sequential?))
+(def-key ::ups-foreign-libs
+  (s/every ::foreign-libs :min-count 1 :into [] :kind sequential?))
 (def-key ::closure-output-charset     non-blank-string?)
 (def-key ::external-config            (s/map-of keyword? map?))
 
@@ -551,7 +563,7 @@ for enabling/disabling common warnings, or a map of specific warning
 keys with associated booleans. Defaults to true.
 
   :warnings true
-  
+
 ;; OR
 
   :warnings {:fn-deprecated false} ;; suppress this warning
@@ -669,7 +681,7 @@ The following Closure warning options are exposed to ClojureScript:
   :undefined-variables
   :unknown-defines
   :visiblity
-  
+
 See the Closure Compiler Warning wiki for detailed descriptions.")
 
 (def-key ::warning-value #{:error :warning :off})
@@ -755,28 +767,29 @@ See the Closure Compiler Warning wiki for detailed descriptions.")
      ::closure-output-charset
      ::external-config
      ::watch-fn])
-   
+
+   ;; TODO some? should be contains?
    (attach-warning ":asset-path has no effect without a :main"
                    (fn [{:keys [asset-path main]}]
                      (not (and (some? asset-path)
                                (nil? main)))))
-   
+
    (attach-warning ":pseudo-names has no effect when :optimizations is not :advanced"
                    (fn [{:keys [pseudo-names optimizations]}]
                      (not (and (some? pseudo-names) (not= optimizations :advanced)))))
 
    ;; **** TODO add in the cljs.compiler unknown/similar-key warning here
-   
+
    ;; these next warnings probably be elevated to an errors attach-reason
    (attach-warning ":preamble has no effect when :optimizations is not :none"
                    (fn [{:keys [preamble optimizations]}]
                      (not (and (some? preamble)
                                (not (opt-none? optimizations))))))
-   
+
    (attach-warning ":hashbang has no effect when :target is not :nodejs"
                    (fn [{:keys [hashbang target]}]
                      (not (and (some? hashbang) (not= target :nodejs)))))
-   
+
    (attach-warning ":clojure-defines has no effect when :optimizations is :whitespace"
                    (fn [{:keys [closure-defines optimizations]}]
                      (not (and (some? closure-defines)
@@ -784,13 +797,13 @@ See the Closure Compiler Warning wiki for detailed descriptions.")
 
    (attach-warning "missing an :output-to option - you probably will want this ..."
                    (fn [{:keys [output-to]}] (some? output-to)))
-   
+
    (attach-reason  ":closure-defines requires a :main when :optimizations is :none"
                    (fn [{:keys [closure-defines optimizations main]}]
                      (not (and (some? closure-defines)
                                (nil? main)
                                (opt-none? optimizations)))))
-   
+
    (attach-reason  ":source-map must be a boolean when :optimizations is :none"
                    (fn [{:keys [source-map optimizations]}]
                      (not (and
@@ -807,54 +820,68 @@ See the Closure Compiler Warning wiki for detailed descriptions.")
    ))
 
 (do
-  
+
   (s/conform ::compiler-options {:asset-path "asdf/asdf"})
   (s/explain ::compiler-options {:source-map "asdf" :optimizations :none})
   (s/explain ::compiler-options {:source-map false :optimizations :simple})
 
-  (key-docs-for-explain-data (s/explain-data ::compiler-options {:output-wrapper 1}))
-  
+  #_(key-docs-for-explain-data (s/explain-data ::compiler-options {:output-wrapper 1}))
+
   (def not-blank? (complement string/blank?))
 
   (deftest verify-warnings-and-reasons
     ;; no warnings or errors on a perectly valid empty options
     (is (s/valid? ::compiler-options {}))
     (is (string/blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"}))))
-    
+
     (testing "warnings produce warnings and are still valid"
       ;; no warning produced
       ;; :asset-path
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:asset-path "asdf/asdf"}))))
-      (is (s/valid? ::compiler-options {:asset-path "asdf/asdf"}))
-      
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
+                                                                  :asset-path "asdf/asdf"}))))
+      (is (s/valid? ::compiler-options {:output-to "main.js"
+                                        :asset-path "asdf/asdf"}))
+
       ;; pseudo-names
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:pseudo-names true}))))
-      (is (s/valid? ::compiler-options {:pseudo-names true}))
-      
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
+                                                                  :pseudo-names true}))))
+      (is (s/valid? ::compiler-options {:output-to "main.js"
+                                        :pseudo-names true}))
+
       ;; preamble
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:preamble ["asdf"] :optimizations :advanced}))))
-      (is (s/valid? ::compiler-options {:preamble ["asdf"] :optimizations :advanced}))    
-      
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
+                                                                  :preamble ["asdf"] :optimizations :advanced}))))
+      (is (s/valid? ::compiler-options {:output-to "main.js"
+                                        :preamble ["asdf"] :optimizations :advanced}))
+
       ;; hash-bang
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:hashbang true}))))
-      (is (s/valid? ::compiler-options {:hashbang true}))
-      
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
+                                                                  :hashbang true}))))
+      (is (s/valid? ::compiler-options {:output-to "main.js"
+                                        :hashbang true}))
+
       ;; clojure-defines
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:closure-defines {'goog.DEBUG false}
+      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
+                                                                  :closure-defines {'goog.DEBUG false}
                                                                   :optimizations :whitespace}))))
-      (is (s/valid? ::compiler-options {:closure-defines {'goog.DEBUG false}
-                                      :optimizations :whitespace}))        
-      
+      (is (s/valid? ::compiler-options {:output-to "main.js"
+                                        :closure-defines {'goog.DEBUG false}
+                                        :optimizations :whitespace}))
+
       )
 
     (testing "fail on attach-reason predicates"
-      (is (not (s/valid? ::compiler-options {:closure-defines {'goog.DEBUG false}})))
-      (is (not (s/valid? ::compiler-options {:source-map "asdf"})))
-      (is (not (s/valid? ::compiler-options {:source-map false :optimizations :advanced})))
+      (is (not (s/valid? ::compiler-options {:output-to "main.js"
+                                             :closure-defines {'goog.DEBUG false}})))
+      (is (not (s/valid? ::compiler-options {:output-to "main.js"
+                                             :source-map "asdf"})))
+      (is (not (s/valid? ::compiler-options {:output-to "main.js"
+                                             :source-map false :optimizations :advanced})))
       )
-    
-    (is (s/valid? ::compiler-options { :optimizations :advanced})))
-  
+
+    (is (s/valid? ::compiler-options {:output-to "main.js"
+                                      :optimizations :advanced})))
+
   (clojure.test/run-tests 'strictly-specking.cljs-options-schema)
-  
+
 )

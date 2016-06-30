@@ -95,13 +95,15 @@
   (and (sequential? x)
        (= (first x) 'every)
        (even? (count (drop 2 x)))
-       (= 'map?
-          (:clojure.spec/kind-form
-           (apply hash-map (drop 2 x))))))
+       (let [args (apply hash-map (drop 2 x))]
+         (or
+          (= {} (:into args))
+          (= 'map? (:clojure.spec/kind-form args))))
+       (rest (second x))))
 
 (defn handle-expanded-map-of [f desc]
-  (when-let [[ky-pred val-pred] (expanded-map-of-desc? desc)]
-    (poss-path f (list 'map-of ky-pred val-pred))))
+  (when-let [res (expanded-map-of-desc? desc)]
+    (poss-path f (cons 'map-of res))))
 
 ;; doesn't handle recursion
 ;; this can be refactored into a more general movement through
@@ -111,8 +113,6 @@
 
 ;; also need to make a suite of tests to verify that this is future proof
 ;; and that our expectations about spec descriptions hold firm
-
-
 
 (defn poss-path [f desc]
   (if (and
@@ -125,8 +125,7 @@
     ;;#{[{:end-ref desc }]}
     (let [poss-path       (partial poss-path f)
           regex-poss-path (partial regex-poss-path f)
-          key-paths       (partial key-paths f)
-          ]
+          key-paths       (partial key-paths f)]
       (condp = (and (sequential? desc)
                     (first desc))
         'keys        (key-paths desc)
@@ -155,34 +154,78 @@
         'col-checker  (path-set-cons int-key (poss-path (second desc)))
         ;; need to check for every tuple
         ;; 
-        'every  (or (handle-expanded-map-of desc)
+        'every  (or (handle-expanded-map-of f desc)
                     (path-set-cons int-key (poss-path (second desc))))
         'map-of (let [key-predicate (second desc)]
                   (path-set-cons {:ky ::pred-key :ky-pred-desc key-predicate}
-                                 (poss-path (last desc))))
+                                 (poss-path (nth desc 2))))
+        'every-ky (let [key-predicate (second desc)]
+                    (path-set-cons {:ky ::pred-key :ky-pred-desc key-predicate}
+                                   (poss-path (nth desc 2))))        
         'spec   (poss-path (second desc))
         ;; 'cat   
         ;; else
+        false (f empty-path-set)
+        
         empty-path-set
         
         ))))
 
-(defn prevent-recursion-find [{:keys [path-keys-seen to] :as state}]
-  (fn [x]
-    (cond
-      (= x to) #{[]}
-      (path-keys-seen x) #{[]}
-      :else (prevent-recursion-find (update-in state [:path-keys-seen] conj x)))))
+(defn empty [f]
+  (fn [x] (if (= empty-path-set x)
+            empty-path-set
+            (f x))))
+
+(defn possible-child-keys [ns-ky-or-spec]
+  (map first
+   (poss-path
+    (empty
+     (fn [x]
+       (fn [x]
+         #{[]})))
+    (s/describe ns-ky-or-spec))))
+
+;; could keep a set for a faster check
+(defn path-predicate [pred]
+  ((fn path-monad [path]
+     (empty
+      (fn [k]
+        (let [p (cons k path)]
+          (cond
+            ;; prevents infinite recursion
+            ((set path) k) #{}
+            (pred p) #{[]}
+            :else (path-monad p))))))
+   []))
+
+#_(poss-path
+   (path-predicate (constantly false))
+   (s/describe :fig-opt/build-config))
+
+#_(possible-child-keys :cljsbuild.lein-project.require-builds/cljsbuild)
+
+#_(possible-child-keys :fig-opt/build-config)
+
+;; finding keys of a parent
+
+(defn find-key-path-without-ns [from to]
+  (poss-path
+   (path-predicate #(= (name (first %)) (name to)))
+   (s/describe from)))
+
+#_(s/describe (s/every-kv keyword? ::s/any))
+
+#_(find-key-path-without-ns :cljsbuild.lein-project.require-builds/cljsbuild :builds)
 
 (defn find-key-path [from to]
   (poss-path
    ;; can prevent recursion here easily
    ;; but this monady approach makes me think that there is a better
    ;; structure to the above
-   (prevent-recursion-find {:to to :path-keys-seen #{}})
+   (path-predicate #(= to (first %)))
    (s/describe from)))
 
-#_(find-key-path :fig-opt/real :fig-opt/car1)
+#_(find-key-path-without-ns :fig-opt/real :car1)
 
 
 ;; regex NOTE

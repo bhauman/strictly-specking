@@ -132,7 +132,8 @@
         (fn [k]
           (let [unused-spec (k->s k)]
             (cond
-              (and (coll? key-val)
+              ;; making this be more complex
+              (and (and (coll? key-val) (coll? (first key-val))) 
                    (s/valid? unused-spec key-val))
               [k 1]
               (map? key-val)

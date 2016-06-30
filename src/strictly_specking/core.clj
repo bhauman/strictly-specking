@@ -15,7 +15,26 @@
 
 ;; *** TODO move to predicates load file
 
+(defn indent-lines [n s]
+  (->> (string/split s #"\n")
+       (map #(str (cp/blanks n) %))
+       (string/join "\n")))
+
 (defn non-blank-string? [x] (and (string? x) (not (string/blank? x))))
+
+;; fixing tuple paths
+(defmacro map-of [key-pred value-pred]
+  `(s/every-kv ~key-pred ~value-pred
+               :into {}
+               :kind map?
+               ::s/kfn (fn [a# b#] [::tuple-map-key (nth b# 0)])))
+
+(defmacro non-empty-map-of [key-pred value-pred]
+  `(s/every-kv ~key-pred ~value-pred
+               :min-count 1
+               :into {}
+               :kind map?
+               ::s/kfn (fn [a# b#] [::tuple-map-key (nth b# 0)])))
 
 ;; * Helper specs
 ;; 
@@ -30,6 +49,7 @@
   This spec will provide an explanation for each unknown key."
   [& args]
   ;; check the args with s/keys
+  ;; `(s/keys ~@args)
   (let [form (macroexpand `(s/keys ~@args))]
     `(strictly-specking.strict-keys/strict-mapkeys-impl
       (strictly-specking.parse-spec/parse-keys-args ~@args) ~form)))
@@ -126,7 +146,6 @@
 
 ;; *** mark errors with a type
 
-
 (defn error-type [error]
   (cond
     (error ::unknown-key)      ::unknown-key
@@ -135,10 +154,72 @@
     (error ::missing-keys)     ::missing-required-keys
     (and (= (:reason error) "Insufficient input")
          (= (:val error) '())) ::should-not-be-empty
+    (= (:pred error) '(clojure.core/<= 1 (clojure.core/count %) Integer/MAX_VALUE))
+    ::should-not-be-empty
+    ;; add wrong size collection
     :else ::bad-value))
 
 (defn add-error-type [error]
   (assoc error ::error-type (error-type error)))
+
+;; *** fix map tuple keys
+;; Since the every-kv breaks the :in path for maps
+;; we have defined a map-of and a non-empty-map-of above
+;; these have paths that we can fix
+
+;; I really prefer not to mess with this but making the
+;; :in path work when the path goes through a every-kv
+;; seems non trivial.
+
+;; If the :in path gets fixed we can detect if an error is a
+;; key error by noting if the :val is = to the (comp last :in)
+
+(defn map-tuple-path-element? [x]
+  (and (vector? x)
+       (= (first x)
+          ::tuple-map-key)))
+
+(defn map-tuple-path? [p]
+  (some map-tuple-path-element? p))
+
+(defn fix-map-path [p]
+  (loop [p p
+         res []]
+    (if-let [f (first p)]
+      (if (and (vector? f)
+               (= (first f)
+                  :strictly-specking.core/tuple-map-key))
+        (if (#{0 1} (first (rest p))) ;; if this "bug" gets fixed this shouldn't break
+          (recur (rest (rest p)) (conj res (second f)))
+          (recur (rest p) (conj res (second f))))
+        (recur (rest p)        (conj res f)))
+      res)))
+
+#_(fix-map-path [[:strictly-specking.core/tuple-map-key :ASdf]
+                 1
+                 [:strictly-specking.core/tuple-map-key :asdf]
+                 1])
+
+(defn upgrade-to-bad-key [e]
+  (if (and (map-tuple-path-element? (last (butlast (:in e))))
+           (= 0 (last (:in e))))    
+    (assoc e ::error-type ::bad-key)
+    e))
+
+(defn fix-map-paths [errors]
+  (map
+   #(if (map-tuple-path? (:in %))
+      (-> %
+          upgrade-to-bad-key
+          (update-in [:in] fix-map-path))
+      %)
+   errors))
+
+#_(fix-map-paths ['{:path [0],
+                  :pred keyword?,
+                  :val 3,
+                  :via [],
+                  :in [[:strictly-specking.core/tuple-map-key 3] 0]}])
 
 ;; *** parse out and added missing keys data on error
 
@@ -169,6 +250,21 @@
                            :pred (cons 'or (map :pred errors))
                            :path (cons ::combined-path (map :path errors))
                            ::error-type ::bad-value-comb-pred))))
+        paths (set (map :in errors-to-comb))]
+    (concat (filter #(not (paths (:in %))) errors)
+            errors-to-comb)))
+
+(defn combined-or-key-pred [errors]
+  (let [errors-to-comb
+        (->> errors
+             (filter #(= (::error-type %) ::bad-key))
+             (group-by :in)
+             (filter #(< 1 (count (second %))))
+             (map (fn [[_ errors]]
+                    (assoc (first errors)
+                           :pred (cons 'or (map :pred errors))
+                           :path (cons ::combined-path (map :path errors))
+                           ::error-type ::bad-key-comb-pred))))
         paths (set (map :in errors-to-comb))]
     (concat (filter #(not (paths (:in %))) errors)
             errors-to-comb)))
@@ -223,13 +319,20 @@
 ;; general paths this implies that the more general path succeeded in
 ;; a certain branch and that path is the one that is failing
 
-(defn specific-paths-filter-general [errors]
-  ;; sort by path length
-  ;; keep the first
-  ;; check it the next is a subpath of the previous
-  
-  )
+(defn sub-path? [sub-path* path]
+  (and (<= (count sub-path*) (count path))
+       (reduce #(and %1 %2) (map = path sub-path*))))
 
+(defn specific-paths-filter-general [errors]
+  (->> errors
+       (sort-by (comp - count :in))
+       (reduce (fn [accum {:keys [in] :as err}]
+                 (if (some #(sub-path? in %) (keys accum))
+                   accum
+                   (assoc accum in err))) {})
+       vals))
+
+#_(specific-paths-filter-general [{:in [1 2 3 ]} {:in [1 2 3 4]}])
 
 
 #_(->> terrors
@@ -254,6 +357,8 @@
    ::missing-required-keys
    ::unknown-key
    ::should-not-be-empty
+   ::bad-key-comb-pred
+   ::bad-key   
    ::bad-value-comb-pred
    ::bad-value])
 
@@ -272,11 +377,13 @@
        (map #(assoc % ::root-data validated-data))
        (map #(if file
                  (assoc % ::file-source file)
-               %))       
+                 %))
+       fix-map-paths
        sort-errors
        combined-missing-keys
        combined-or-pred
-       corrections-overide-missing-required))
+       corrections-overide-missing-required
+       specific-paths-filter-general))
 
 ;; ** error-message function
 ;; this will provide a more meaningful description of whats gone wrong
@@ -307,9 +414,12 @@
 
 ;; TODO fill this out
 (def symbol-type-table
-  '{string?  String
+  '{non-blank-string? NonBlankString
+    string?  String
+    symbol?  Symbol
     keyword? Keyword
     vector?  Vector
+    sequential? Sequence
     map?     Map
     integer? Integer
     number?  Number})
@@ -333,7 +443,9 @@
 
 (defn format-predicate-str [{:keys [pred val]}]
   (cond
-    (seq-with-first 'or pred)
+    (or
+     (seq-with-first 'or pred)
+     (seq-with-first 'some-fn pred))
     (str (if (every? symbol-type-table (rest pred))
            "It should be one of: "
            "It should satisfy one of: ")
@@ -374,6 +486,7 @@
 
 ;; *** TODO figure out how to identify where to point to
 
+;; we need to abstract how we choose a key for a given error
 ;; might not need this yet
 
 (defn parent [e]
@@ -403,34 +516,47 @@
     (parent-vector? e)   "Vector"
     (parent-sequence? e) "Sequence"))
 
+(defn format-bad-value [val]
+  (let [formatted (color (format-summarized-value val) :bad-value)]
+    (if (coll? val)
+      (str "\n" (indent-lines 2 formatted))
+      formatted)))
+
 (defn bad-value-message [{:keys [path pred val reason via in] :as e}]
   (let [k (last in)]
     (cond
       (parent-map? e)
       (str "The key " (color (pr-str k) :focus-key)
-           " has the wrong value "
-           (color (format-summarized-value val) :bad-value)
-           ".\n" (format-predicate-str e))
+           " at " (color (pr-str (vec in)) :focus-path)
+           " has a non-conforming value: " (format-bad-value val)
+           "\n" (format-predicate-str e))
       (parent-coll? e)
       (str "The " (parent-type-str e)
            " at " (color (pr-str (vec (butlast in))) :focus-path)
-           " contains bad value "
-           (color (format-summarized-value val) :bad-value)
-           ".\n" (format-predicate-str e))
+           " contains a non-conforming value: " (format-bad-value val)
+           "\n" (format-predicate-str e))
       :else
       (str "The key " (color (pr-str k) :focus-key)
-           " has the wrong value "
-           (color (format-summarized-value val) :bad-value)
-           ".\n" (format-predicate-str e)))))
+           " has a non-conforming value: " (format-bad-value val)
+           "\n" (format-predicate-str e)))))
 
 (defmethod error-message ::bad-value [e] (bad-value-message e))
 (defmethod error-message ::bad-value-comb-pred [e] (bad-value-message e))
 
+(defn bad-key-message [{:keys [path pred val reason via in] :as e}]
+  (let [k (last in)]
+    (str "The key " (color (pr-str k) :focus-key)
+         " at " (color (pr-str (vec in)) :focus-path)
+         " does not conform. "
+         "\n" (format-predicate-str e))))
+
+(defmethod error-message ::bad-key [e]           (bad-key-message e))
+(defmethod error-message ::bad-key-comb-pred [e] (bad-key-message e))
+
 (defmethod error-message ::should-not-be-empty [{:keys [path pred val reason via in] :as e}]
   (str "The value " (color (pr-str val) :bad-value)
        " at key " (color (last in) :focus-key)
-       " should not be empty.\n"
-       (format-predicate-str (update-in e [:pred] (fn [x] (list '+ x))))))
+       " should not be empty.\n"))
 
 (defmethod error-message ::unknown-key [{:keys [path pred val reason via in] :as e}]
   (str "Found unrecognized key " (color (::unknown-key e) :error-key)
@@ -469,10 +595,16 @@
 
 (defmethod inline-message :default [e] (str "The key " (-> e :in last) " has a problem"))
 (defmethod inline-message ::bad-value [e]
-  (str "The key " (-> e :in last) " has a bad value"))
+  (str "The key " (-> e :in last) " has a non-conforming value"))
 
 (defmethod inline-message ::bad-value-comb-pred [e]
-  (str "The key " (-> e :in last) " has a bad value"))
+  (str "The key " (-> e :in last) " has a non-conforming value"))
+
+(defmethod inline-message ::bad-key [e]
+  (str "The key " (-> e :in last) " does not conform."))
+
+(defmethod inline-message ::bad-key-comb-pred [e]
+  (str "The key " (-> e :in last) " does not conform."))
 
 (defmethod inline-message ::should-not-be-empty [e]
   (str "The key " (-> e :in last) " should not be empty"))
@@ -495,10 +627,7 @@
 
 ;; *** use pprint to print contextual errors
 
-(defn indent-lines [n s]
-  (->> (string/split s #"\n")
-       (map #(str (cp/blanks n) %))
-       (string/join "\n")))
+
 
 (defn pprint-sparse-path
   ([data path key-message-map colors]
@@ -565,6 +694,14 @@
 (defmethod pprint-inline-message ::unknown-key [e]
   (pprint-in-context e (:in e)
                      {(::unknown-key e) (inline-message e)}))
+
+(defmethod pprint-inline-message ::bad-key [e]
+  (pprint-in-context e (butlast (:in e))
+                     {(last (:in e)) (inline-message e)}))
+
+(defmethod pprint-inline-message ::bad-key-comb-pred [e]
+  (pprint-in-context e (butlast (:in e))
+                     {(last (:in e)) (inline-message e)}))
 
 (defmethod pprint-inline-message ::misspelled-key [e]
   (pprint-in-context e (:in e)
@@ -759,12 +896,14 @@ Usage:
                        :strictly-specking.core/root-data {},
                        :strictly-specking.core/file-source "asdf"})
 
-(defn look-up-ns-keywords-in-spec [typ kys]
-  (let [desc (s/describe typ)]
-    (when (or (= (first desc) 'strict-keys)
-              (= (first desc) 'keys))
-      (when-let [ks (not-empty (:keys->specs (apply parse/parse-keys-args (rest desc))))]
-        (keep (fn [k] (if (namespace k) k (get ks k))) kys)))))
+(defn look-up-ns-keywords-in-spec
+  "Fetches the child ns-keys of a spec given the un-namespaced keys."
+  [typ kys]
+  (when-let [desc (try (s/describe typ) (catch Throwable e nil))]
+    (when-let [path-elems (not-empty (parse/possible-child-keys typ))]
+      (->> path-elems
+           (filter (fn [{:keys [ky ky-spec]}] ((set kys) ky)))
+           (map :ky-spec)))))
 
 (defmulti keys-to-document ::error-type)
 
@@ -774,12 +913,12 @@ Usage:
 
 (defmethod keys-to-document ::unknown-key [e] nil)
 
-(defmethod keys-to-document ::misspelled-key [e] (correct-keys-to-doc e)
+(defmethod keys-to-document ::misspelled-key [e] #_(correct-keys-to-doc e)
   (when-let [typ (last (:via e))]
     (look-up-ns-keywords-in-spec typ (when-let [x (::correct-key e)]
                                        [x]))))
 
-(defmethod keys-to-document ::wrong-key [e] (correct-keys-to-doc e)
+(defmethod keys-to-document ::wrong-key [e] #_(correct-keys-to-doc e)
   (when-let [typ (last (:via e))]
     (look-up-ns-keywords-in-spec typ (when-let [x (::correct-key e)]
                                        [x]))))
@@ -828,6 +967,18 @@ Usage:
                       :strictly-specking.core/error-type :strictly-specking.core/bad-value,
                       :strictly-specking.core/root-data {},
                       :strictly-specking.core/file-source "asdf"})
+
+ (keys-to-document '{:path [:cljsbuild],
+                     :pred (contains? % :builds),
+                     :val {}
+                     ,
+                     :via
+                     [:strictly-specking.test-schema/lein-project-with-cljsbuild
+                      :cljsbuild.lein-project.require-builds/cljsbuild],
+                     :in [:cljsbuild],
+                     :strictly-specking.core/missing-keys [:builds],
+                     :strictly-specking.core/error-type :strictly-specking.core/missing-required-keys
+})
   
   )
 
@@ -876,7 +1027,7 @@ Usage:
      #_(take 1)
      (mapv test-print))))
 
-(do #_comment
+(comment
   (def structer (read-string (slurp "tester.edn")))
 
   (def terr (s/explain-data :fig-opt/builds structer))
