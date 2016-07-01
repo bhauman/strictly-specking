@@ -95,14 +95,61 @@ This makes it easier to override pprint functionality for certain types."
     (pprint-map-with-pointer* amap)
     (orig-pprint-map amap)))
 
+;; adjusting keys into view
+
+(defn key-position [map k]
+  (or (some identity
+        (map-indexed (fn [i [a _]]
+                       (when (= a k) i)) map))
+      400))
+
+(defn move-comments-into-view [amap]
+  (let [length (or *print-length* 4)]
+    (if-let [comments (-> amap meta :comments)]
+      (if (or (<= (count amap) length)
+              (every? (comp
+                       (fnil (partial >= (dec length)) (inc length))
+                       (partial key-position amap))
+                      (keys comments)))
+        amap
+        (let [comment-parts (select-keys amap (keys comments))
+              r (apply dissoc amap (keys comments))
+              [comment-parts r] (if (and (>= (count r) 1)
+                                         (<= (count comments) (dec length)))
+                                  [(cons (first r) comment-parts) (rest r)]
+                                  [comment-parts r])]
+          (with-meta (into {} (reduce #(cons %2 %1) r (reverse comment-parts)))
+            (meta amap))))
+      amap)))
+
+#_(move-comments-into-view (with-meta {:a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7}
+                             {:comments {:b {:comment "yo"} :f {:comment "hi"}}}))
+#_(> 3 (apply max (map (partial key-position {:a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7})
+                     [:a :rr])))
+
+(defn calc-map-length [amap]
+  (max
+   (if-let [comments (-> amap meta :comments)]
+     (let [max-pos (apply max (map #(or (key-position amap %) 400)
+                                   (keys comments)))]
+       (if (> 9 max-pos)
+         (+ 3 max-pos)
+         (inc (count comments))))                        
+     4)
+   4))
+
+#_(calc-map-length (with-meta {:a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7}
+                     {:comments {:b {:comment "yo"} :d {:comment "hi"}}}))
+
 (defn abbrev-pprint-map-with-pointer [amap]
   (if-let [abr-level  (-> amap meta :abbrev)]
-    (let [length (if (= :tight abr-level) 2 4)
+    (let [length (if (= :tight abr-level) 2
+                     (calc-map-length amap))
           level  (if (= :tight abr-level) 2 3)]
       (binding [*print-level* (+ level
                                  (or @(resolve 'clojure.pprint/*current-level*) 0))
                 *print-length* length]
-        (pprint-map-with-pointer amap)))
+        (pprint-map-with-pointer (move-comments-into-view amap))))
     (pprint-map-with-pointer amap)))
 
 (let [pprint-message (pp/formatter-out "^---- ~5I~@{~a~^ ~_~}~0I")]
