@@ -13,7 +13,8 @@
 (def ^:dynamic *print-styles*
   {:highlight   [:bright]
    :good        [:green]
-   :good-pred   [:green]   
+   :good-pred   [:green]
+   :good-key    [:green]      
    :bad         [:red]
    :bad-value   [:red]
    :error-key   [:red]
@@ -25,7 +26,7 @@
    :focus-path  [:magenta]
    :message     [:magenta]
    :pointer     [:magenta]
-   :none        [:reset]})
+   :none        [:magenta]})
 
 (defmacro black-and-white [body]
   (binding [*print-styles* {}]

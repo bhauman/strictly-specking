@@ -445,6 +445,7 @@ Default: \"localhost\"
   :websocket-host :server-ip")
 
 ;; **** TODO we can detect malformed and misspelled tags ... fun!!!
+;; in websocket-url we can do fine grained parsing to detect malformed urls
 
 (comment
   (defmacro str-regex [s]
@@ -645,13 +646,28 @@ Example figwheel.edn file
    :opt-un [::figwheel-options
             ::build-ids]))
 
-(comment
+(do
   (def test-data
     { :cljsbuild {
                   :builds {:dev {:id "example-admin"
-                                 :asdfasdfasdf ["src" "dev" "tests" "../support/src"]
+                                 :source-paths ["src" "dev" "tests" "../support/src"]
                                  ;:notify-command ["notify"]
                                  :assert true
+
+
+
+                           
+                                 :compiler { :main 'example.core
+                                             :asset-path "js/out"
+                                             :output-to "resources/public/js/example.js"
+                                             :output-dir "resources/public/js/out"
+                                             :libs ["libs_src" "libs_sscr/tweaky.js"]
+                                             ;; :externs ["foreign/wowza-externs.js"]
+                                             :foreign-libs [{:file "foreign/wowza.js"
+                                                             :provides ["wowzacore"]}]
+                                             ;; :recompile-dependents true
+                                             ;; :source-map true
+                                            :optimizations :whitespace
                                  :figwheel
                                  {:websocket-host "localhost"
                                   :on-jsload      'example.core/fig-reload
@@ -660,20 +676,11 @@ Example figwheel.edn file
                                               "http://localhost:3449/index.html"
                                               "http://localhost:3449/index.html"
                                               "http://localhost:3449/index.html"
-                                                          "http://localhost:3449/index.html"]
+                                              "http://localhost:3449/index.html"]
+                                  :source-map true
                                   :debug true
                                   }
-                           
-                                 :compiler { :main 'example.core
-                                            :asset-path "js/out"
-                                            :output-to "resources/public/js/example.js"
-                                            :output-dir "resources/public/js/out"
-                                            :libs ["libs_src" "libs_sscr/tweaky.js"]
-                                            ;; :externs ["foreign/wowza-externs.js"]
-                                            :foreign-libs [{:file "foreign/wowza.js"
-                                                            :provides ["wowzacore"]}]
-                                            ;; :recompile-dependents true
-                                            :optimizations :none}}
+                                            }}
                            #_:asdf1 #_{:id "example-admin"
                                  :source-paths
                                  ["src" "dev" "tests" "../support/src"]
@@ -762,9 +769,9 @@ Example figwheel.edn file
                    nil)
   
   (first (ss/prepare-errors (s/explain-data ::lein-project-with-cljsbuild
-                                     test-data)
-                     test-data
-                     nil))
+                                            test-data)
+                            test-data
+                            nil))
  
   )
 

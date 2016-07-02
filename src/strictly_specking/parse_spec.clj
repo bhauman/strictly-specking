@@ -21,6 +21,8 @@
 (defn spec-from-registry [spec-key]
   (get (s/registry) spec-key))
 
+;; TODO the shape of parsed keys args is redundant and doesn't
+;; capture required keys information
 (defn parse-keys-args [& {:keys [req opt req-un opt-un]}]
   (let [spec-specs  (into (vec req) opt)
         un-specs    (into (vec req-un) opt-un)
@@ -122,73 +124,79 @@
       (if (fn? res)
         (poss-path res (s/describe desc))
         res))
-    ;;#{[{:end-ref desc }]}
     (let [poss-path       (partial poss-path f)
           regex-poss-path (partial regex-poss-path f)
           key-paths       (partial key-paths f)]
-      (condp = (and (sequential? desc)
-                    (first desc))
-        'keys        (key-paths desc)
-        'strict-keys (key-paths desc)
-        'or          (path-set-join (map poss-path
-                                         (desc-keyed-vals desc)))
-        ;; this is really the intersection of paths, but there is a notion of
-        ;; a infinite path set so ...
-        'and         (path-set-join (map poss-path (desc-vals desc)))
-        'merge       (path-set-join (map poss-path (desc-vals desc)))
-        
-        '*     (path-set-cons int-key (regex-poss-path (second desc)))
-        '+     (path-set-cons int-key (regex-poss-path (second desc)))
-        '?     (path-set-cons int-key (regex-poss-path (second desc)))
-        'alt   (path-set-cons int-key
-                              (path-set-join (map regex-poss-path (desc-keyed-vals desc))))
-        'cat   (path-set-cons int-key
-                              (path-set-join (map regex-poss-path (desc-keyed-vals desc))))
-        '&     (path-set-cons int-key (regex-poss-path (second desc)))
-        ;; cat is a splicing operation something without a numeric path is going to get one consed on
-        
-        
-        'tuple        (path-set-cons int-key
-                                     (path-set-join (map poss-path (desc-vals desc))))
-        'col-of       (path-set-cons int-key (poss-path (second desc)))
-        'col-checker  (path-set-cons int-key (poss-path (second desc)))
-        ;; need to check for every tuple
-        ;; 
-        'every  (or (handle-expanded-map-of f desc)
-                    (path-set-cons int-key (poss-path (second desc))))
-        'map-of (let [key-predicate (second desc)]
-                  (path-set-cons {:ky ::pred-key :ky-pred-desc key-predicate}
-                                 (poss-path (nth desc 2))))
-        'every-ky (let [key-predicate (second desc)]
-                    (path-set-cons {:ky ::pred-key :ky-pred-desc key-predicate}
-                                   (poss-path (nth desc 2))))        
-        'spec   (poss-path (second desc))
-        ;; 'cat   
-        ;; else
-        false (f empty-path-set)
-        
-        empty-path-set
-        
-        ))))
+      (if-let [op (and (sequential? desc)
+                       (first desc))]
+        (condp = op
+          'keys        (key-paths desc)
+          'strict-keys (key-paths desc)
+          'or          (path-set-join (map poss-path
+                                           (desc-keyed-vals desc)))
+          ;; this is really the intersection of paths, but there is a notion of
+          ;; a infinite path set so ...
+          'and         (path-set-join (map poss-path (desc-vals desc)))
+          'merge       (path-set-join (map poss-path (desc-vals desc)))
+          
+          '*     (path-set-cons int-key (regex-poss-path (second desc)))
+          '+     (path-set-cons int-key (regex-poss-path (second desc)))
+          '?     (path-set-cons int-key (regex-poss-path (second desc)))
+          'alt   (path-set-cons int-key
+                                (path-set-join (map regex-poss-path (desc-keyed-vals desc))))
+          'cat   (path-set-cons int-key
+                                (path-set-join (map regex-poss-path (desc-keyed-vals desc))))
+          '&     (path-set-cons int-key (regex-poss-path (second desc)))
+          ;; cat is a splicing operation something without a numeric path is going to get one consed on
+          
+          
+          'tuple        (path-set-cons int-key
+                                       (path-set-join (map poss-path (desc-vals desc))))
+          'col-of       (path-set-cons int-key (poss-path (second desc)))
+          'col-checker  (path-set-cons int-key (poss-path (second desc)))
+          ;; need to check for every tuple
+          ;; 
+          'every  (or (handle-expanded-map-of f desc)
+                      (path-set-cons int-key (poss-path (second desc))))
+          'map-of (let [key-predicate (second desc)]
+                    (path-set-cons {:ky :strictly-specking.core/pred-key
+                                    :ky-pred-desc key-predicate}
+                                   (poss-path (nth desc 2))))
+          ;; TODO this shouldn't be here
+          'non-empty-map-of (let [key-predicate (second desc)]
+                    (path-set-cons {:ky :strictly-specking.core/pred-key
+                                    :ky-pred-desc key-predicate}
+                                   (poss-path (nth desc 2))))
+          'every-ky (let [key-predicate (second desc)]
+                      (path-set-cons {:ky :strictly-specking.core/pred-key
+                                      :ky-pred-desc key-predicate}
+                                     (poss-path (nth desc 2))))        
+          'spec   (poss-path (second desc))
+          ;; 'cat   
+          ;; else
+          (f empty-path-set))
+        (f empty-path-set)))))
 
-(defn empty [f]
-  (fn [x] (if (= empty-path-set x)
-            empty-path-set
-            (f x))))
+(defn empt [f]
+  (fn [x]
+    (if (= empty-path-set x)
+      empty-path-set
+      (f x))))
 
 (defn possible-child-keys [ns-ky-or-spec]
-  (map first
+  (set
+   (map first
    (poss-path
-    (empty
+    (empt
      (fn [x]
-       (fn [x]
+       (fn [y]
          #{[]})))
-    (s/describe ns-ky-or-spec))))
+    (s/describe ns-ky-or-spec)))))
 
 ;; could keep a set for a faster check
 (defn path-predicate [pred]
   ((fn path-monad [path]
-     (empty
+     (empt
       (fn [k]
         (let [p (cons k path)]
           (cond
@@ -204,7 +212,13 @@
 
 #_(possible-child-keys :cljsbuild.lein-project.require-builds/cljsbuild)
 
-#_(possible-child-keys :fig-opt/build-config)
+#_(possible-child-keys :strictly-specking.test-schema/compiler)
+
+#_(s/describe :strictly-specking.test-schema/compiler)
+
+#_(s/describe :strictly-specking.cljs-options-schema/source-map)
+
+#_(s/map-of keyword? (s/map-of keyword? (s/every keyword?)))
 
 ;; finding keys of a parent
 
@@ -212,6 +226,9 @@
   (poss-path
    (path-predicate #(= (name (first %)) (name to)))
    (s/describe from)))
+
+#_(find-key-path-without-ns :strictly-specking.test-schema/compiler
+                          :source-map)
 
 #_(s/describe (s/every-kv keyword? ::s/any))
 
@@ -224,6 +241,15 @@
    ;; structure to the above
    (path-predicate #(= to (first %)))
    (s/describe from)))
+
+(defn spec-key-to-parsed-args [spec-key]
+  (when-let [children (not-empty (possible-child-keys spec-key))]
+    (let [keys->specs (into {} (map (juxt :ky :ky-spec) children))]
+      {:keys->specs keys->specs
+       :k->s        #(or (keys->specs %) %)
+       :known-keys  (set (keys keys->specs))})))
+
+#_(spec-key-to-parsed-args :strictly-specking.test-schema/compiler)
 
 #_(find-key-path-without-ns :fig-opt/real :car1)
 

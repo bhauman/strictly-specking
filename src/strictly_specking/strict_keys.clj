@@ -1,6 +1,6 @@
 (ns strictly-specking.strict-keys
   (:require
-   [strictly-specking.parse-spec :refer [parse-keys-args spec-from-registry]]
+   [strictly-specking.parse-spec :as parse :refer [parse-keys-args spec-from-registry]]
    [clojure.string :as string]
    [clojure.set :as set]
    [clojure.spec :as s]))
@@ -232,7 +232,7 @@
 ;; think about this and the shared functionality
 
 ;; this should be memoized on a per call basis if specs are changing globally
-(defn fuzzy-conform-score-helper [{:keys [known-keys  k->s] :as spec-key-data} map-x]
+(defn fuzzy-conform-score-helper [{:keys [known-keys k->s] :as spec-key-data} map-x]
   (when (map? map-x)
     (let [key-to-score
           (fn [[k v]]
@@ -285,9 +285,11 @@
       (avg [good-key-score
             (avg (into (vec good-key-val-scores) adjusted-key-val-scores))]))))
 
-
-
-
+(defn fuzzy-conform-score-spec-key [spec-key map-x]
+  {:pre [(map? map-x) (spec-from-registry spec-key)]}
+  (fuzzy-conform-score-helper
+   (parse/spec-key-to-parsed-args spec-key)
+   map-x))
 
 (comment
 
@@ -366,13 +368,15 @@
                            (assoc exp-data
                                   :path (conj (:path exp-data) :misspelled-key unknown-key)
                                   :strictly-specking.core/misspelled-key unknown-key
-                                  :strictly-specking.core/correct-key suggest)
+                                  :strictly-specking.core/correct-key suggest
+                                  :strictly-specking.core/correct-key-spec (k->s suggest))
                            (if-let [replace-suggest
                                     (replacement-suggestion spec-key-data x unknown-key)]
                              (assoc exp-data
                                     :path (conj (:path exp-data) :wrong-key unknown-key)
                                     :strictly-specking.core/wrong-key unknown-key
-                                    :strictly-specking.core/correct-key replace-suggest)
+                                    :strictly-specking.core/correct-key replace-suggest
+                                    :strictly-specking.core/correct-key-spec (k->s replace-suggest))
                              (assoc exp-data
                                     :path (conj (:path exp-data) :unknown-key unknown-key)
                                     :strictly-specking.core/unknown-key unknown-key)))))))))))))

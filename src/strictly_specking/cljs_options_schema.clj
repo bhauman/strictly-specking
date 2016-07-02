@@ -802,21 +802,24 @@ See the Closure Compiler Warning wiki for detailed descriptions.")
                    (fn [{:keys [closure-defines optimizations main]}]
                      (not (and (some? closure-defines)
                                (nil? main)
-                               (opt-none? optimizations)))))
+                               (opt-none? optimizations))))
+                   :focus-key :closure-defines)
 
    (attach-reason  ":source-map must be a boolean when :optimizations is :none"
                    (fn [{:keys [source-map optimizations]}]
                      (not (and
                            (some? source-map)
                            (not (boolean? source-map))
-                           (opt-none? optimizations)))))
+                           (opt-none? optimizations))))
+                   :focus-key :source-map)
 
    (attach-reason  ":source-map must be a string? when :optimizations is not :none"
                    (fn [{:keys [source-map optimizations]}]
                      (not (and
                            (some? source-map)
                            (not (string? source-map))
-                           (not (opt-none? optimizations))))))
+                           (not (opt-none? optimizations)))))
+                   :focus-key :source-map)
    ))
 
 (do
