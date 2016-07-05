@@ -81,7 +81,9 @@
 (defn score-suggestion [k->s map-x ky [suggested-key score]]
   (let [key-val  (get map-x ky)
         key-spec (k->s suggested-key)
-        valid    (s/valid? key-spec key-val)]
+        valid    (or (and (spec-from-registry key-spec)
+                          (s/valid? key-spec key-val))
+                     true)]
     [suggested-key
      (cond-> (/ score 10)
        ;; TODO: I don't think this is neccessary at all
