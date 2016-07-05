@@ -9,6 +9,8 @@
                                    non-blank-string?] :as ss]
    [clojure.test :refer [deftest is testing]]))
 
+#_ (remove-ns 'strictly-specking.cljs-options-schema)
+
 ;; for development
 (ss/reset-duplicate-keys)
 
