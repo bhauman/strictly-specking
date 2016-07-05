@@ -239,29 +239,6 @@ Usage:
 
 (defmulti keys-to-document ::error-type)
 
-(defmethod keys-to-document ::unknown-key [e] nil)
-
-;; TODO no need to look up the key here
-(defmethod keys-to-document ::misplaced-key [e]
-  (::document-keys e))
-
-(defmethod keys-to-document ::misspelled-key [e] #_(correct-keys-to-doc e)
-  (or (and (::correct-key-spec e) [(::correct-key-spec e)])
-      (when-let [typ (last (:via e))]
-        (look-up-ns-keywords-in-spec typ (when-let [x (::correct-key e)]
-                                           [x])))))
-
-(defmethod keys-to-document ::wrong-key [e] #_(correct-keys-to-doc e)
-  (or (and (::correct-key-spec e) [(::correct-key-spec e)])
-      (when-let [typ (last (:via e))]
-        (look-up-ns-keywords-in-spec typ (when-let [x (::correct-key e)]
-                                           [x])))))
-
-(defmethod keys-to-document ::missing-required-keys [e]
-  (when-let [missing (not-empty (::missing-keys e))]
-    (let [typ  (last (:via e))]
-      (look-up-ns-keywords-in-spec typ missing))))
-
 (comment
   (keys-to-document '{:path [],
                       :pred (and (contains? % :id) (contains? % :source-paths)),
@@ -789,11 +766,48 @@ to try in order
    :error-focus :key
    :missing-key true})
 
+
+
 #_(upgrade-error (test-e (s/keys :req-un [::fdas]) {:asdf 3}))
 
 #_(error-path (upgrade-error (test-e (s/keys :req-un [::fdas]) {:asdf 3})))
 
 #_(missing-keys '{:path [], :pred (contains? % :id), :val {}, :via [:fig-opt/build-config], :in []})
+
+(defmethod error-message ::missing-required-keys [{:keys [path pred val reason via in] :as e}]
+  (when-let [kys (not-empty (::missing-keys e))]
+    (str "Missing required " (pluralize "key" (count kys)) " "
+         (ep/format-seq-with-and kys) " at path "
+         (color (pr-str (error-path-parent (::error-path e))) :focus-path))))
+
+(defmethod pprint-inline-message ::missing-required-keys [e]
+  (or
+   (and (::file-source e) (ep/pprint-missing-keys-in-file-context e))
+   (ep/pprint-sparse-path (::root-data e)
+                          (error-path-parent (::error-path e))
+                          (into {}
+                                (map (fn [k]
+                                       [k (str "The required key " (pr-str k) " is missing")]))
+                                (::missing-keys e)))))
+
+(defmethod keys-to-document ::missing-required-keys [e]
+  (when-let [missing (not-empty (::missing-keys e))]
+    (let [typ  (last (:via e))]
+      (look-up-ns-keywords-in-spec typ missing))))
+
+(comment
+  (let [data {}
+        errs (s/explain-data (strict-keys :req-un [::asdf])
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil))
+
+
+  )
 
 
 ;; *** bad key
@@ -883,6 +897,8 @@ to try in order
 (defmethod inline-message ::unknown-key [e]
   (str "The key " (::unknown-key e) " is unrecognized"))
 
+(defmethod keys-to-document ::unknown-key [e] nil)
+
 (comment
   (let [data {:abcd 1}                               
         errs (s/explain-data (strict-keys :opt-un [::fargo])
@@ -928,6 +944,14 @@ to try in order
 (defmethod inline-message ::misspelled-key [e]
   (correct-key-message e))
 
+(defn correct-keys-to-document [e]
+  (when-let [spec-key (get (::keys->specs e)
+                           (::correct-key e))]
+    [spec-key]))
+
+(defmethod keys-to-document ::misspelled-key [e]
+  (correct-keys-to-document e))
+
 (comment
   (let [data {:farg 1}                               
         errs (s/explain-data (strict-keys :opt-un [::fargo])
@@ -937,7 +961,11 @@ to try in order
                nil)
     (prepare-errors errs
                     data
-                    nil))
+                    nil)
+    (keys-to-document (first (prepare-errors errs
+                                             data
+                                             nil)))
+    )
   )
 
 ;; *** wrong-key
@@ -986,7 +1014,8 @@ to try in order
 (defmethod inline-message ::wrong-key [e]
   (correct-key-message e))
 
-
+(defmethod keys-to-document ::wrong-key [e]
+  (correct-keys-to-document e))
 
 (comment
   (let [data {:forest {:id "asdf"
@@ -1000,7 +1029,14 @@ to try in order
                nil)
     (prepare-errors errs
                     data
-                    nil))
+                    nil)
+
+    (keys-to-document (first (prepare-errors errs
+                    data
+                    nil)))
+
+    )
+  
   )
 
 
@@ -1080,6 +1116,11 @@ to try in order
 
 (defmethod inline-message ::misplaced-key [e]
   (str "The key " (pr-str (-> e ::unknown-key)) " has been misplaced"))
+
+;; TODO no need to look up the key here
+(defmethod keys-to-document ::misplaced-key [e]
+  (::document-keys e))
+
 
 (comment
   (let [data {:cljsbuild

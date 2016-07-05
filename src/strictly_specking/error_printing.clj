@@ -140,105 +140,30 @@
 
 
 
-
-(defn bad-key-message [{:keys [path pred val reason via in] :as e}]
-  (let [k (last in)]
-    (str "The key " (color (pr-str k) :focus-key)
-         " at " (color (pr-str (vec in)) :focus-path)
-         " does not conform. "
-         "\n" (format-predicate-str e))))
-
-(defmethod error-message ::bad-key [e]           (bad-key-message e))
-(defmethod error-message ::bad-key-comb-pred [e] (bad-key-message e))
-
-(defmethod error-message ::misplaced-key [e]
-  (let [k (::unknown-key e)]
-    (str "The key " (color (pr-str k) :focus-key)
-         " at " (color (pr-str (vec (:in e))) :focus-path)
-         " is on the wrong path. "
-         "\n")))
-
-(defmethod error-message ::attach-reason [e]
-  (str "Error at "
-       (color (pr-str (vec (:in e))) :focus-path) "\n"
-       (:reason e "")))
-
-(defmethod error-message ::should-not-be-empty [{:keys [path pred val reason via in] :as e}]
-  (str "The value " (color (pr-str val) :bad-value)
-       " at key " (color (last in) :focus-key)
-       " should not be empty.\n"))
-
-(defmethod error-message ::unknown-key [{:keys [path pred val reason via in] :as e}]
-  (str "Found unrecognized key " (color (::unknown-key e) :error-key)
-       " at path " (color (pr-str in) :focus-path) "\n"
-       "Must be one of: " (format-seq-with-or pred)))
-
-(defmethod error-message ::missing-required-keys [{:keys [path pred val reason via in] :as e}]
-  (when-let [kys (not-empty (::missing-keys e))]
-    (if (< 1 (count kys))
-      (str "Missing required keys " (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path))
-      (str "Missing required key "  (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path)))))
-
-;; *** TODO ::wrong-key
-;; upon reflection misspelling and wrong keys should have multiple options for correction
-;; we probably should move ::correct-key to ::correct-keys
-;; but the scores of the top choices should be close and in order 
-
-(defmethod error-message ::wrong-key [{:keys [path pred val reason via in] :as e}]
-  (str "The key " (color (::wrong-key e) :error-key)
-       " is unrecognized. Perhaps you meant "
-       (color (::correct-key e) :correct-key)
-       "?"))
-
-;; *** TODO ::misspelled-key
-;; upon reflection misspelling and wrong keys should have multiple options for correction
-;; we probably should move ::correct-key to ::correct-keys
-
-(defmethod error-message ::misspelled-key [{:keys [path pred val reason via in] :as e}]
-  (str "The key " (color (::misspelled-key e) :error-key)
-       " is misspelled. It should probably be "
-       (color (::correct-key e) :correct-key)))
-
 ;; *** TODO: fill in the rest of the error types
 
 (defmulti inline-message :strictly-specking.core/error-type)
 
 (defmethod inline-message :default [e] (str "The key " (-> e :in last) " has a problem"))
 
-(defmethod inline-message ::misplaced-key [e]
-  (str "The key " (-> e ::unknown-key) " has been misplaced"))
-
-(defmethod inline-message ::attach-reason [e]
-  (:reason e " error here"))
-
-(defmethod inline-message ::bad-value-comb-pred [e]
-  (str "The key " (-> e :in last) " has a non-conforming value"))
-
-(defmethod inline-message ::bad-key [e]
-  (str "The key " (-> e :in last) " does not conform."))
-
-(defmethod inline-message ::bad-key-comb-pred [e]
-  (str "The key " (-> e :in last) " does not conform."))
-
-(defmethod inline-message ::should-not-be-empty [e]
-  (str "The key " (-> e :in last) " should not be empty"))
-
-(defmethod inline-message ::unknown-key [e]
-  (str "The key " (::unknown-key e) " is unrecognized"))
-
-;; this is interestion I need to add a key
 #_(defmethod inline-message ::missing-required-keys [e]
   (str "XXXXX "
        (-> e :in last)
        " is missing"))
 
-(defmethod inline-message ::wrong-key [e]
-  (str "The key " (-> e ::wrong-key) " should probably be " (::correct-key e)))
-
-(defmethod inline-message ::misspelled-key [e]
-  (str "The key " (-> e ::misspelled-key) " should probably be " (::correct-key e)))
-
 ;; *** use pprint to print contextual errors
+
+;; we could put a default value in the message-map
+(defn add-missing-key [parent-path data ky]
+  (let [parent-coll (get-in data parent-path)]
+    (if (and
+         (map? parent-coll)
+         (not (contains? parent-coll ky)))
+      (assoc-in data (conj (vec parent-path) ky) '...)
+      data)))
+
+(defn add-missing-keys [parent-path data kys]
+  (reduce (partial add-missing-key parent-path) data kys))
 
 (defn pprint-sparse-path
   ([data path key-message-map colors]
@@ -246,7 +171,7 @@
     (pp/with-pprint-dispatch annot/error-path-dispatch
      (pp/pprint
       (annot/annotate-path-only
-       data
+       (add-missing-keys path data (keys key-message-map))
        path
        {:abbrev true
         :comments (into {}
@@ -255,6 +180,10 @@
                                 (merge {:key-colors     [:error-key]
                                         :value-colors   [:reset]
                                         :comment-colors [:pointer]
+                                        ;; TODO parameterize what to fill in
+                                        ;; only when needed
+                                        ;; could be cool to show a generated sample value
+                                        ;;:default-missing-value '_____
                                         :comment message}
                                        colors)])
                              key-message-map))})))
@@ -294,74 +223,10 @@
 ;; this should dispatch and display in file context if there is file
 ;; information on the error
 
-;; ***** TODO the real abstraction here is a way to determine
-;; the focus-key and the path to the containing structure
-;; in other words we need an abstraction of a path
-;; and wether the path points to key endpoint of the path
-;; or the value on the path
-
-;; this ends up being different for each error
-
-;; I can imagine a multimethod that returns this
-;; {:path [] :focus (or :ky :vl)}
-;; where the last component of the path is the focus key
-
 (defmulti pprint-inline-message :strictly-specking.core/error-type)
 
-(defmethod pprint-inline-message :default [e]
-  (pprint-in-context e (butlast (:in e))
-                     {(last (:in e)) (inline-message e)}
-                     {:key-colors [:highlight]
-                      :value-colors [:bad-value]}))
-
-(defmethod pprint-inline-message ::unknown-key [e]
-  (pprint-in-context e (:in e)
-                     {(::unknown-key e) (inline-message e)}))
-
-;; attach-reason provides a focus key when it's ambigious which
-;; key is 
-(defmethod pprint-inline-message ::attach-reason [{:keys [in focus-key] :as e}]
-  (let [[path ky] (if focus-key
-                    [in focus-key]
-                    [(butlast in) (last in)])]
-    (pprint-in-context e path
-                       {ky (inline-message e)})))
-
-(defmethod pprint-inline-message ::bad-key [e]
-  (pprint-in-context e (butlast (:in e))
-                     {(last (:in e)) (inline-message e)}))
-
-(defmethod pprint-inline-message ::bad-key-comb-pred [e]
-  (pprint-in-context e (butlast (:in e))
-                     {(last (:in e)) (inline-message e)}))
-
-(defmethod pprint-inline-message ::misplaced-key [e]
-  (pprint-in-context e (:in e)
-                     {(::unknown-key e) (inline-message e)}))
-
-(defmethod pprint-inline-message ::misspelled-key [e]
-  (pprint-in-context e (:in e)
-                     {(::misspelled-key e) (inline-message e)}))
-
-(defmethod pprint-inline-message ::wrong-key [e]
-  (pprint-in-context e (:in e)
-                     {(::wrong-key e) (inline-message e)}))
-
-(defn pprint-missing-keys-context [e]
-  (pprint-sparse-path (reduce #(update-in %1 (vec (:in e))
-                                          (fn [x]
-                                            ;; order matters for display purposes
-                                            (->> x
-                                                 seq
-                                                 (cons [%2 '_____])
-                                                 (into {}))))
-                              (:strictly-specking.core/root-data e)
-                              (:strictly-specking.core/missing-keys e))
-                      (:in e)
-                      (into {}
-                            (map (fn [k]
-                                   [k (str "The required key " (pr-str k) " is missing")]))
-                            (:strictly-specking.core/missing-keys e))))
+;; *** inserting missing keys as rows in an edn-string
+;; in order to display missing keys in a file
 
 (defn insert-missing-keys [formatted-lines kys line column]
   (let [length (apply max (map (comp count str) kys))]
@@ -376,7 +241,7 @@
         (rest r))))))
 
 (defn inline-missing-keys? [e]
-  (let [m (get-in (:strictly-specking.core/root-data e) (:in e))]
+  (let [m (get-in (:strictly-specking.core/root-data e) (-> e ::error-path :in-path butlast (or [])))]
     (when (<= 2 (count m))
       (let [[first-key second-key] (keys m)
             loc-data1 (edn-string-nav/get-path-in-clj-file (conj (vec (:in e)) first-key)
@@ -387,18 +252,17 @@
           loc-data1)))))
 
 (defn pprint-missing-keys-in-file-context [e]
-  (let [m (get-in (::root-data e) (:in e))]
-    (if-let [{:keys [line column value path loc]}
-             (inline-missing-keys? e)]
-      (do
-        (println "File:" (str (::file-source e)))
-        (-> (cp/fetch-lines (::file-source e))
-            (cp/number-lines)
-            (cp/insert-message line column
-                               (str "Map is missing required key"
-                                    (if (= 1 (count (::missing-keys e)))
+  (if-let [{:keys [line column value path loc]}
+           (inline-missing-keys? e)]
+    (do
+      (println "File:" (str (:strictly-specking.core/file-source e)))
+      (-> (cp/fetch-lines (:strictly-specking.core/file-source e))
+          (cp/number-lines)
+          (cp/insert-message line column
+                             (str "Map is missing required key"
+                                  (if (= 1 (count (::missing-keys e)))
                                       "" "s")))
-            (insert-missing-keys (::missing-keys e) line column )
+            (insert-missing-keys (::missing-keys e) line column)
             (cp/extract-range-from-center line 10)
             cp/trim-blank-lines
             cp/blank-space-trim
@@ -406,16 +270,14 @@
             cp/color-lines
             cp/print-formatted-lines)
         true)
-      (pprint-in-file (::file-source e)
+      (pprint-in-file (:strictly-specking.core/file-source e)
                       (butlast (:in e))
                       {(last (:in e))
                        (str "Map is missing required key"
-                            (if (= 1 (count (::missing-keys e)))
+                            (if (= 1 (count (:strictly-specking.core/missing-keys e)))
                               (str ": " (pr-str (first (::missing-keys e))))
-                              (str "s: " (string/join ", " (map pr-str (::missing-keys e))))
-                              ))}))))
+                              (str "s: " (string/join ", "
+                                                      (map pr-str
+                                                           (:strictly-specking.core/missing-keys e))))
+                              ))})))
 
-(defmethod pprint-inline-message ::missing-required-keys [e]
-  (or
-   (and (::file-source e) (pprint-missing-keys-in-file-context e))
-   (pprint-missing-keys-context e)))
