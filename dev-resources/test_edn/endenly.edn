@@ -1,0 +1,3 @@
+;; this is a comment in my file
+[{:compiler 1
+  :asdfasdf [1 2]}]

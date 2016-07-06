@@ -228,6 +228,8 @@
 ;; *** inserting missing keys as rows in an edn-string
 ;; in order to display missing keys in a file
 
+;; todo this can be pushed down into the 
+
 (defn insert-missing-keys [formatted-lines kys line column]
   (let [length (apply max (map (comp count str) kys))]
     (concat
@@ -241,7 +243,8 @@
         (rest r))))))
 
 (defn inline-missing-keys? [e]
-  (let [m (get-in (:strictly-specking.core/root-data e) (-> e ::error-path :in-path butlast (or [])))]
+  (let [m (get-in (:strictly-specking.core/root-data e)
+                  (-> e :strictly-specking.core/error-path :in-path butlast (or [])))]
     (when (<= 2 (count m))
       (let [[first-key second-key] (keys m)
             loc-data1 (edn-string-nav/get-path-in-clj-file (conj (vec (:in e)) first-key)
@@ -260,9 +263,9 @@
           (cp/number-lines)
           (cp/insert-message line column
                              (str "Map is missing required key"
-                                  (if (= 1 (count (::missing-keys e)))
+                                  (if (= 1 (count (:strictly-specking.core/missing-keys e)))
                                       "" "s")))
-            (insert-missing-keys (::missing-keys e) line column)
+            (insert-missing-keys (:strictly-specking.core/missing-keys e) line column)
             (cp/extract-range-from-center line 10)
             cp/trim-blank-lines
             cp/blank-space-trim
@@ -275,9 +278,10 @@
                       {(last (:in e))
                        (str "Map is missing required key"
                             (if (= 1 (count (:strictly-specking.core/missing-keys e)))
-                              (str ": " (pr-str (first (::missing-keys e))))
+                              (str ": " (pr-str (first (:strictly-specking.core/missing-keys e))))
                               (str "s: " (string/join ", "
                                                       (map pr-str
                                                            (:strictly-specking.core/missing-keys e))))
                               ))})))
+
 

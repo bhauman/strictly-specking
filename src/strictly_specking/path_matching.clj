@@ -68,10 +68,13 @@ fails against the current value (or doesn't even fuzzy conform.
       [[]]
       (or
        (condp = (:ky p)
-         :strictly-specking.core/int-key (when (sequential? data)
-                     (match-next (map-indexed vector data)))
-         :strictly-specking.core/pred-key (when (not= (:ky-pred-desc p) ::s/any)
-                      (match-next data))
+         :strictly-specking.core/int-key
+         (when (sequential? data)
+           (match-next (map-indexed vector data)))
+         :strictly-specking.core/pred-key
+         (when (and (map? data)
+                    (not= (:ky-pred-desc p) ::s/any))
+           (match-next data))
          (and (map? data) (contains? data (:ky p))
               (match-next (select-keys data [(:ky p)]))))
        [[]]))))
@@ -123,6 +126,9 @@ fails against the current value (or doesn't even fuzzy conform.
                      (set? data)        (comp set vector)
                      (sequential? data) list)]
         (f (generate-path-structure (get data p) (rest path) v))))))
+
+(defn parent-path-from-genereated-structure [gened-path-structure
+                                           ])
 
 #_(generate-path-structure  {:a {:b [{:c {}}]}} [:a :b 1 :c ::int-key ::pred-key] 555)
 
