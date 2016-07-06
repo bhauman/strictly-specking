@@ -1,6 +1,7 @@
 (ns strictly-specking.path-matching
   (:require
    [clojure.spec :as s]
+   [clojure.set :as set]
    [clojure.pprint :as pp]
    [strictly-specking.strict-keys :as strict-impl]))
 
@@ -127,10 +128,27 @@ fails against the current value (or doesn't even fuzzy conform.
                      (sequential? data) list)]
         (f (generate-path-structure (get data p) (rest path) v))))))
 
-(defn parent-path-from-genereated-structure [gened-path-structure
-                                           ])
+(defn generate-path-structure-path
+  "Generates a data structure to demonstrate where to place a key"
+  [data path]
+  (let [p (first path)]
+    (cond
+      (or (empty? path) (nil? path)) '()
+      (nil? data)
+      (let [nxt (generate-path-structure-path nil (rest path))]
+        (if (or (integer? p) (= :strictly-specking.core/int-key p))
+          (cons 0 nxt)
+          (cons p nxt)))
+      :else
+      (when-let [f (cond
+                     ;; This is where you would do sampling
+                     (map? data)        (partial cons p)
+                     (vector? data)     (partial cons 0)
+                     (set? data)        (partial cons 0)
+                     (sequential? data) (partial cons 0))]
+        (f (generate-path-structure-path (get data p) (rest path)))))))
 
-#_(generate-path-structure  {:a {:b [{:c {}}]}} [:a :b 1 :c ::int-key ::pred-key] 555)
+#_(generate-path-structure-path  {:a {:b [{:c {}}]}} [:a :b 1 :c ::int-key ::pred-key])
 
 #_(best-possible-path
    ['({:ky-spec :strictly-specking.test-schema/cljsbuilds, :ky :cljsbuild}
