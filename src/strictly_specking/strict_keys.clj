@@ -1,9 +1,10 @@
 (ns strictly-specking.strict-keys
   (:require
-   [strictly-specking.parse-spec :as parse :refer [parse-keys-args spec-from-registry]]
-   [clojure.string :as string]
    [clojure.set :as set]
-   [clojure.spec :as s]))
+   [clojure.spec :as s]
+   [clojure.string :as string]
+   [strictly-specking.fuzzy :refer [similar-key]]
+   [strictly-specking.parse-spec :as parse :refer [parse-keys-args spec-from-registry]]))
 
 #_(s/explain :fig-opt/builds [{:compiler 1
                                :id 1
@@ -23,37 +24,6 @@
 ;; TODO memoization of fuzzy-conform-helper on a per call basis
 ;; TODO extract the find key path behavior into its own file
 ;; TODO extract strict-keys into its own file
-
-
-
-(defn- next-row
-  [previous current other-seq]
-  (reduce
-    (fn [row [diagonal above other]]
-      (let [update-val (if (= other current)
-                          diagonal
-                          (inc (min diagonal above (peek row))))]
-        (conj row update-val)))
-    [(inc (first previous))]
-    (map vector previous (next previous) other-seq)))
-
-(defn levenshtein
-  "Compute the levenshtein distance between two [sequences]."
-  [sequence1 sequence2]
-  (peek
-    (reduce (fn [previous current] (next-row previous current sequence2))
-            (map #(identity %2) (cons nil sequence2) (range))
-            sequence1)))
-
-(defn similar-key* [thresh ky ky2]
-  (and (keyword? ky)
-       (keyword? ky2)
-       #_(= (namespace ky) (namespace ky2))
-       (let [dist (levenshtein (str ky) (str ky2))]
-         (when (<= dist thresh)
-           dist))))
-
-(def similar-key (partial similar-key* 3))
 
 (defn spelling-suggestions [kys ky]
   (->> kys
