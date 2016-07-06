@@ -26,7 +26,7 @@
    :focus-path  [:magenta]
    :message     [:magenta]
    :pointer     [:magenta]
-   :none        [:magenta]})
+   :none        [:reset]})
 
 (defmacro black-and-white [body]
   (binding [*print-styles* {}]

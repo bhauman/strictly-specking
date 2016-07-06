@@ -1,350 +1,837 @@
 (ns strictly-specking.core
   (:require
-   [strictly-specking.parse-spec :as parse]
-   [strictly-specking.strict-keys :as strict-impl]
-   [strictly-specking.ansi-util :as cl :refer [color]]
-   [strictly-specking.annotated-pprint :as annot]
-   [strictly-specking.edn-string-nav :as edn-string-nav]
-   [strictly-specking.context-print :as cp]
-   [clansi.core :refer [with-ansi]]
+   [clansi.core :refer [with-ansi without-ansi]]
    [clojure.pprint :as pp]
-   [clojure.string :as string]
    [clojure.set :as set]
-   [clojure.spec :as s]))
+   [clojure.spec :as s]
+   [clojure.string :as string]
+   [strictly-specking.annotated-pprint :as annot]
+   [strictly-specking.ansi-util :as cl :refer [color]]
+   [strictly-specking.context-print :as cp]
+   [strictly-specking.edn-string-nav :as edn-string-nav]
+   [strictly-specking.error-printing :refer [error-message
+                                             inline-message
+                                             pprint-inline-message] :as ep]
+   [strictly-specking.fix-paths :as fix-paths]
+   [strictly-specking.parse-spec :as parse]
+   [strictly-specking.path-matching :as path-match]
+   [strictly-specking.strict-keys :as strict-impl]))
 
 
-;; *** TODO move to predicates load file
+#_(remove-ns 'strictly-specking.core)
 
-(defn indent-lines [n s]
-  (->> (string/split s #"\n")
-       (map #(str (cp/blanks n) %))
-       (string/join "\n")))
+;; * TODO move to predicates load file
 
-(defn non-blank-string? [x] (and (string? x) (not (string/blank? x))))
+(defn non-blank-string? [x]
+  (and (string? x) (not (string/blank? x))))
 
-;; fixing tuple paths
-(defmacro map-of [key-pred value-pred]
-  `(s/every-kv ~key-pred ~value-pred
-               :into {}
-               :kind map?
-               ::s/kfn (fn [a# b#] [::tuple-map-key (nth b# 0)])))
+;; * A def-key construct
 
-(defmacro non-empty-map-of [key-pred value-pred]
-  `(s/every-kv ~key-pred ~value-pred
-               :min-count 1
-               :into {}
-               :kind map?
-               ::s/kfn (fn [a# b#] [::tuple-map-key (nth b# 0)])))
+;; Creating a def-key contruct to allow for simultaneous defining of
+;; specs and docs, this will also check for duplicate keys
 
-;; * Helper specs
-;; 
+;; ** meta data on keyswords
 
-;; ** Strict-keys Spec
+;; our own private registry for meta data on namespaced keys
+;; we will be adding docs to keys this way along with other
+(defonce ^:private registry-ref (atom {}))
 
-(defmacro strict-keys
-  "This is a spec that has the same signature as the clojure.spec/keys spec.
-  The main difference is that it fails on keys that are not the 
-  [:req :opt :req-un :opt-un] specifications.
+(defn key-meta [k]
+  (get @registry-ref k))
 
-  This spec will provide an explanation for each unknown key."
+(defn key-vary-meta [k f & args]
+    {:pre [(keyword? k) (namespace k)]}
+  (swap! registry-ref #(apply update-in % [k] f args)))
+
+(defn key-doc
+  "Given a namespaced key returns a String of documentation if it has been provided"
+  [k] (-> k key-meta ::doc))
+
+(defn add-key-doc
+  "Adds documentation to a namespaced key"
+  [k doc]
+  {:pre [(string? doc)]}
+  (key-vary-meta k assoc ::doc doc))
+
+(defn fetch-docs
+  "Given a collection of keywords return a map from those keys to their documentation"
+  [kys]
+  (->>  kys
+       (keep (fn [k] (when-let [d (key-doc k)]
+                       [k d])))
+       (into {})))
+
+;; ** Checking for duplicate keys
+
+;; As a spec gets larger its very easy to duplicate a key and break
+;; everything. It's nice to have a safe guard in place.
+
+;; can use this to test for duplicate definitions This works fine with
+;; a reloading workflow as long as you reload the whole file.
+
+(defn duplicate-key-check* [k]
+  (when (-> k key-meta ::defined)
+    (throw (ex-info "Error duplicate key spec" {:k k})))
+  (key-vary-meta k assoc ::defined true)
+  k)
+
+;; a development helper
+;; could take a namespace ??
+(defn reset-duplicate-keys
+  "Empties the duplicate keys atom. Only intended for interactive development."
+  []
+  (doseq [[k v] @registry-ref]
+    (key-vary-meta k dissoc ::defined)))
+
+;; ** the def-key macro
+
+;; the spec to parse out the def-key macro arguments
+(def def-key-arg-spec (s/cat :k (s/and keyword? namespace)
+                             :spec ::s/any
+                             :doc (s/? non-blank-string?)
+                             :meta-data
+                             (s/* (s/cat :ky (s/and keyword? namespace)
+                                         :val ::s/any))))
+
+(defmacro def-key
+  "Defines a spec via clojure.spec/def, checks for duplicates, adds
+  optional documentation and optional meta data.
+
+Usage:
+(def-key ::my-keyword-key integer? \"Optional documentation\")
+
+You can also provide extra meta-data 
+(def-key ::my-keyword-key integer? \"Optional documentation\"
+         ::example-data 1)"
   [& args]
-  ;; check the args with s/keys
-  ;; `(s/keys ~@args)
-  (let [form (macroexpand `(s/keys ~@args))]
-    `(strictly-specking.strict-keys/strict-mapkeys-impl
-      (strictly-specking.parse-spec/parse-keys-args ~@args) ~form)))
+  (let [{:keys [k spec doc meta-data] :as res} (s/conform def-key-arg-spec args)]
+    (if-not (and k spec)
+      (throw (ex-info
+              (with-out-str (s/explain def-key-arg-spec args))
+              (or (s/explain-data def-key-arg-spec args) {})))
+      `(do
+         (duplicate-key-check* ~k)
+         (s/def ~k ~spec)
+         ~(when doc
+            `(add-key-doc ~k ~doc))
+         (doseq [m# ~meta-data]
+           (key-vary-meta ~k assoc (:ky m#) (:val m#)))))))
 
+;; * finding which keys to document
+;; Given an prepared error we need to find
+;; a key that has documentation that is relevant to the
+;
 
-;; ** Attach Reason Spec
+(defn search-for-key-in-via [via k]
+  (some #(when (or (= (name %) (name k))
+                   (= k %))
+           %) (reverse via)))
 
-;; attach-reason is a spec that attaches a :reason to a failing specs
-;; explain-data this :reason is printed out as part of the message
-;; generated by clojure.spec/explain
+;; TODO this could be much better with ::error-path
+(defn find-key-to-document [e]
+  (let [{:keys [via in]} e]
+    (->> (reverse in)
+         (filter keyword?)
+         (some #(search-for-key-in-via via %)))))
 
-(defn ammend-explain-impl [parent-spec {:keys [reason] :as additional-info}]
-  {:pre [(or (nil? reason) (string? reason))]}
-  (reify
-    clojure.lang.IFn
-    (invoke [this x] (parent-spec x))
-    clojure.spec/Spec
-    (conform* [_ x] (s/conform* parent-spec x))
-    (unform* [_ x] (s/unform* parent-spec x))
-    (explain* [_ path via in x]
-      (when-let [err (first (s/explain* parent-spec path via in x))]
-        [(cond-> err
-           reason (update-in [:reason] str "\n - " )
-           true   (merge additional-info))]))
-    ;; These can be improved
-    (gen* [_ a b c]
-      (s/gen* parent-spec a b c))
-    (with-gen* [_ gfn]
-      (s/with-gen* parent-spec gfn))
-    (describe* [_] (s/describe* parent-spec))))
+(defn look-up-ns-keywords-in-spec
+  "Fetches the child ns-keys of a spec given the un-namespaced keys."
+  [typ kys]
+  (when-let [desc (try (s/describe typ) (catch Throwable e nil))]
+    (when-let [path-elems (not-empty (parse/possible-child-keys typ))]
+      (->> path-elems
+           (filter (fn [{:keys [ky ky-spec]}] ((set kys) ky)))
+           (map :ky-spec)))))
 
-(defmacro attach-reason [reason spec & additional-info]
-  `(ammend-explain-impl (s/spec ~spec)
-                        ~(into {:reason reason
-                                ::error-type ::attach-reason}
-                               (apply hash-map additional-info))))
+;; let errors define how documentation gets looked
+;; different errors will need different strategies
+(defmulti keys-to-document ::error-type)
 
-#_(s/explain-data (attach-reason "asdf" (fn [x] false)
-                               :focus-key :asdf)
-                {})
-
-;; ** Attach Warning Spec
-
-;; There are situations that we just want to warn about. Here is a spec
-;; that will print out a warning and will always pass.
-
-(defn attach-warning-impl [message-or-fn parent-spec]
-  {:pre [(or (fn? message-or-fn) (string? message-or-fn))]}
-  (reify
-    clojure.lang.IFn
-    (invoke [this x] (parent-spec x))
-    clojure.spec/Spec
-    (conform* [_ x]
-      (if (s/valid? parent-spec x)
-        (s/conform* parent-spec x)
-        (do
-          (println "CLJS Compiler Options Warning: " (if (string? message-or-fn)
-                                                       message-or-fn
-                                                       (message-or-fn x)))
-          x)))
-    (unform* [_ x] x)
-    (explain* [_ path via in x] nil)
-    ;; These can be improved
-    (gen* [_ a b c]
-      (s/gen* parent-spec a b c))
-    (with-gen* [_ gfn] 
-      (s/with-gen* parent-spec gfn))
-    (describe* [_] (cons 'attach-warning (s/describe* parent-spec)))))
-
-(defmacro attach-warning [reason spec]
-  `(attach-warning-impl ~reason (s/spec ~spec)))
+(defmethod keys-to-document :default [e]
+  (or (::document-keys e)
+      (when-let [k (find-key-to-document e)]
+        [k])))
 
 ;; * moving from errors to messages
 
-;; ** filtering errors
-;;
-;; *** upgrading unknown key errors to misplaced or misplaced misspelled key errors
-;; *** could remove the possible missing required
-;; *** key errors caused by misspelling could remove the local versions of
-;;     these "duplicate" errors in strict-keys perhaps add a reconizable type
-;; *** TODO need to add the original structure that the errors are on
+;; spec returns what we will consider raw errors
+;; let's interpret these errors to provide more
+;; semantic value
 
-#_ (def terrors (s/explain-data :fig-opt/builds [{:compiler 1
-                                                  :id 1
-                                                  :source-path 2
-                                                  }]))
+;; ** error type graph
 
-;; *** detect missing-keys 
+;; Use derive and friends to create a tree of error types
 
-(defn missing-keys [error]
-  (when ((every-pred sequential?
-                     #(= (first %) 'contains?)
-                     #(keyword? (last %)))
-         (:pred error))
-    (->> (:pred error)
-         last
-         vector
-         not-empty)))
+;; We will use this tree to provide a graph of predicates to
+;; conditionally upgrade a given error to a next level error
 
+;; by using derive and providing ordering by eliminating siblings
+;; have are creating a very extensible system where other libs
+;; can introduce errors into the heirarchy
 
-#_(missing-keys '{:path [], :pred (contains? % :id), :val {}, :via [:fig-opt/build-config], :in []})
+(def sibling-elimination (atom {}))
 
-;; *** mark errors with a type
+(defn eliminate-siblings
+  "This is a mechanism to state that certain sibling type must fail
+  before trying this type."
+  [typ & to-eliminate]
+  (assert (keyword? typ))
+  (assert (namespace typ))
+  (assert (every? #(and (keyword? %)
+                        (namespace %)) to-eliminate))
+  (swap! sibling-elimination assoc typ (set to-eliminate)))
 
-(defn error-type [error]
-  (cond
-    (error ::error-type)       (error ::error-type) 
-    (error ::unknown-key)      ::unknown-key
-    (error ::misspelled-key)   ::misspelled-key
-    (error ::wrong-key)        ::wrong-key
-    (error ::missing-keys)     ::missing-required-keys
-    (and (= (:reason error) "Insufficient input")
-         (= (:val error) '())) ::should-not-be-empty
-    (= (:pred error) '(clojure.core/<= 1 (clojure.core/count %) Integer/MAX_VALUE))
-    ::should-not-be-empty
-    ;; add wrong size collection
-    :else ::bad-value))
+(defn order-siblings-by-elimination
+  "This is a graph sorting of siblings based on what the require to
+  have happened first"
+  [siblings]
+  (if (= 1 (count siblings))
+    siblings
+    (first
+     (for [sib siblings
+           :let [rest-sibs (remove #(= sib %) siblings)
+                 eliminations (set (apply concat
+                                          (keep @sibling-elimination rest-sibs)))]
+           :when (not (eliminations sib))
+           :let [ordering (order-siblings-by-elimination rest-sibs)]
+           :when ordering]
+       (cons sib ordering)))))
 
-(defn add-error-type [error]
-  (assoc error ::error-type (error-type error)))
+(defn derived-children [typ]
+  (->> @#'clojure.core/global-hierarchy
+       :parents
+       (filter (fn [[k v]] (v typ)))
+       (map first)))
 
-;; *** fix map tuple keys
-;; Since the every-kv breaks the :in path for maps
-;; we have defined a map-of and a non-empty-map-of above
-;; these have paths that we can fix
+(defn children-in-order [typ]
+  (let [desc (derived-children typ)]
+    (reverse (order-siblings-by-elimination desc))))
 
-;; I really prefer not to mess with this but making the
-;; :in path work when the path goes through a every-kv
-;; seems non trivial.
+(def root-error-type ::bad-value)
 
-;; If the :in path gets fixed we can detect if an error is a
-;; key error by noting if the :val is = to the (comp last :in)
+(defn total-order
+  "this is used to give precedence to the display of errors"
+  ([] (cons root-error-type (total-order root-error-type)))
+  ([root-type]
+   (let [desc (children-in-order root-type)]
+     (concat desc (mapcat total-order desc)))))
 
-(defn map-tuple-path-element? [x]
-  (and (vector? x)
-       (= (first x)
-          ::tuple-map-key)))
+;; ** upgrade multimethod
+;; this is essentially a predicate when given a type such as ::bad-value
+;; and an error it will return an error decorated with type info or nil
+;; if this error doesn't match this type
 
-(defn map-tuple-path? [p]
-  (some map-tuple-path-element? p))
+;; we are adding decorations here because some of these checks are
+;; pretty expensive
 
-(defn fix-map-path [p]
-  (loop [p p
-         res []]
-    (if-let [f (first p)]
-      (if (and (vector? f)
-               (= (first f)
-                  :strictly-specking.core/tuple-map-key))
-        (if (#{0 1} (first (rest p))) ;; if this "bug" gets fixed this shouldn't break
-          (recur (rest (rest p)) (conj res (second f)))
-          (recur (rest p) (conj res (second f))))
-        (recur (rest p)        (conj res f)))
-      res)))
+(defmulti upgrade-to-error-type?
+  "Takes an spec based problem and an error-type and returns
 
-#_(fix-map-path [[:strictly-specking.core/tuple-map-key :ASdf]
-                 1
-                 [:strictly-specking.core/tuple-map-key :asdf]
-                 1])
+An upgraded error if the error is a match
+nil if no match 
+:try-descedants if this error is in a chain of errors 
+to try in order
+"
+  (fn [error-type err] error-type))
 
-;; 
-;; Another way to fix paths is to call this on demand
+;; now we can simply go through the tree of errors types
+;; this can be upgraded to skip errors in an skip-errors set
 
-(declare fix-path)
+;; TODO fill this in
+;; a notion that we can easily skip certain error types
+;; not implemented yet
+(def ^:dynamic *skip-errors-types* #{})
 
-(defn fix-path-true [p data path target-val]
-  (when-let [res (fix-path data path target-val)]
-    (cons p res)))
+(defn upgrade-error* [error-type e]
+  (when-let [upg-err (upgrade-to-error-type? error-type e)]
+    (let [descend (children-in-order error-type)]
+      (or (some #(upgrade-error* % upg-err) descend)
+          upg-err))))
 
-(defn handle-map-path [data path target-val]
-  (let [p (first path)]
-    (or (and
-         (contains? data p)
-         (or (fix-path-true p (get data p) (rest path) target-val)
-             ;; more work for the val
-             (and
-              (#{0 1} (second path))
-              (let [vv (if (= 0 (second path)) p (get data p))]
-                (fix-path-true p vv (drop 2 path) target-val)))))
-        ;; if it's a number look the tuple and call rest rest
-        (and
-         (number? p)
-         (> (count data) p) ;; key exists
-         (#{0 1} (second path))
-         (let [[k v] (nth (seq data) p)
-               vv (if (= 0 (second path)) k v)]
-           (fix-path-true k vv (drop 2 path) target-val))))))
+;; we always upgrade errors from the root
+;; if the ::error-type isn't found return the original error
 
-(defn handle-seq-path [data path target-val]
-  (let [p (first path)]
-    (and (number? p)
-         (> (count data) p) 
-         (fix-path-true p (nth data p) (rest path) target-val))))
-
-(defn fix-path [data path target-val]
-  (cond
-    (and (= '() path) (= data target-val))
-    '()
-    (= '() path)
-    false
-    (map? data)
-    (handle-map-path data path target-val)
-    (coll? data)
-    (handle-seq-path data path target-val)
-    :else false))
-
-;; there may be tiny ambiguous edge cases
-;; {0 [0]} 
-;; {:asdf 1
-;;  1 [1]}
-(defn fix-error-path
-  "searches for the correct path to the val in the current datastructure"
-  [{:keys [in val]} data]
-  (fix-path data in val))
+(defn upgrade-error [e]
+  (or (upgrade-error* root-error-type e)
+      e))
 
 
+;; * error path
+
+;; error paths are interesting for several reasons
+;; - one is that currently the :in path returned by spec/explain-data can be very
+;;   hard to navigate, so we must fix it
+;; - another reason is that an error path can either point to a value, or in the
+;;   case of a map it can point to a malformed key
+
+;; we will have a notion of an error path, that we will add to the raw error
+
+;; error-path-type
+;; { :in-path [] ;; a vector path that works with get-in on the root datastructure 
+;;   :error-focus :value ;; or :key
+;;   ;; missing key isn't necessary we can tell if the collection doesn't have it
+;;   :missing-key true } 
+
+;; ** TODO make a spec for error-path
+
+(defn fix-path [err]
+  (if-let [pth (fix-paths/fix-error-path err (:strictly-specking.core/root-data err))]
+    pth
+    (:in err)))
+
+;; error path returns the error path type for the error
+(defmulti error-path ::error-type)
+
+(defn default-error-path [err]
+  {:in-path (fix-path err)
+   :error-focus :value})
+
+(defmethod error-path :default [err]
+  (default-error-path err))
+
+(defn error-path-parent
+  "Given an error with an ::error-path return the path to the parent collection
+of thie error element."
+  [e]
+  (-> e ::error-path :in-path butlast (or [])))
+
+(defn error-key
+  "Given an error with an ::error-path returh the key that this error is on."
+  [e]
+  (-> e ::error-path :in-path last))
+
+(defn error-focus [e]
+  (-> e ::error-path :error-focus))
+
+;; * error definitions
+
+;; ** TODO go over error message base cases especially when there is no parent collection
+;; ** TODO see how much the error path can inform the message text
+
+;; ** bad-value error
+
+(defmethod upgrade-to-error-type? ::bad-value [_ {:keys [error-type] :as err}]
+  (when (nil? (::error-type err))
+    (assoc err ::error-type ::bad-value)))
+
+;; printing a bad value message
+
+(defn parent-collection [e]
+  (when-let [par-path (error-path-parent e)]
+    (get-in (::root-data e) par-path)))
+
+(defn bad-value-message [{:keys [path pred val reason via in] :as e}]
+  (let [ky  (error-key e)
+        ;; I don't think its possible for this to be nil
+        pth (error-path-parent e)
+        parent-coll  (parent-collection e)]
+    (cond
+      (map? parent-coll)
+      (str "The key " (color (pr-str ky) :focus-key)
+           " at "     (color (pr-str pth) :focus-path)
+           " has a non-conforming value: " (ep/format-bad-value val)
+           "\n" (ep/format-predicate-str e))
+      ;; handle sequential collections differently
+      (coll? parent-coll)
+      (str "The " (ep/type-str parent-coll)
+           " at " (color (pr-str pth) :focus-path)
+           " contains a non-conforming value: " (ep/format-bad-value val)
+           "\n" (ep/format-predicate-str e))
+      :else
+      (str "The key " (color (pr-str ky) :focus-key)
+           " has a non-conforming value: " (ep/format-bad-value val)
+           "\n" (ep/format-predicate-str e)))))
+
+(defmethod error-message ::bad-value [e] (bad-value-message e))
+(defmethod error-message ::bad-value-comb-pred [e] (bad-value-message e))
+
+(defmethod inline-message ::bad-value [e]
+  (str "The value at key " (error-key e) " doesn't conform"))
+(defmethod inline-message ::bad-value-comb-pred [e]
+  (str "The value at key " (error-key e) " doesn't conform"))
+
+(defmethod pprint-inline-message :default [e]
+  (ep/pprint-in-context e (error-path-parent e)
+                        {(error-key e) (inline-message e)}
+                        ;; can change the colors based on focus
+                        (let [focus (error-focus e)]
+                          (if (= :key focus)
+                            {:key-colors   [:error-key]
+                             :value-colors [:none]}
+                            {:key-colors   [:highlight]
+                             :value-colors [:bad-value]}))))
+
+;; ** attach reason error
+(derive ::attach-reason ::bad-value)
+
+;; this is basically a no-op
+;; we could simply the ::error-type in the macro
+
+(defmethod upgrade-to-error-type? ::attach-reason [_ err]
+  (when (::attach-reason err)
+    (assoc err ::error-type ::attach-reason)))
+
+(defmethod error-path ::attach-reason [{:keys [val focus-key] :as err}]
+  (if focus-key
+    {:in-path (concat (fix-path err)
+                      (list focus-key))
+     :error-focus :key
+     :missing-key (not (get val focus-key))}
+    (default-error-path err)))
+
+(defmethod error-message ::attach-reason [e]
+  (str "Error at "
+       (color (pr-str (vec (:in-path (::error-path e)))) :focus-path) "\n"
+       (:reason e "")))
+
+(defmethod inline-message ::attach-reason [e]
+  (:reason e " error here"))
+
+(defmethod keys-to-document ::attach-reason [e]
+  (when-let [typ (last (:via e))]
+    (look-up-ns-keywords-in-spec typ (when-let [x (:focus-key e)]
+                                       [x]))))
+
+;; ** wrong-size-collection
+
+(derive ::wrong-size-collection ::bad-value)
+
+;; TODO this needs a test to make sure that it doesn't change
+;; from under us
+(defn wrong-size-pred? [pred]
+  (when (and (sequential? pred)
+             (sequential? (nth pred 2 nil)))
+    (let [[cc<=' min-v [cccount' _] max-v] pred]
+      (when (and (= cc<=' 'clojure.core/<=)
+                 (= cccount' 'clojure.core/count))
+        {::min-count min-v
+         ::max-count max-v}))))
+
+(defmethod upgrade-to-error-type? ::wrong-size-collection [_ {:keys [pred] :as err}]
+  (when-let [merge-data (wrong-size-pred? pred)]
+    (-> err
+        (merge merge-data)
+        (assoc ::error-type ::wrong-size-collection))))
+
+(defn pluralize [w i]
+  (if (= 1 i) w (str w "s")))
+
+(defn it-should-have-at-least [i w]
+  (str "It should have at least " (color i :good) " "
+       (pluralize w i)))
+
+(defmethod error-message ::wrong-size-collection [{:keys [path pred val reason via in] :as e}]
+  ;; the base case here is an
+  (str "The collection at key "
+       (error-key e)
+       " is too small it only contains " (color (count (:val e)) :bad-value) " "
+       (pluralize "value" (count (:val e))) "\n"
+       (it-should-have-at-least (::min-count e) "value") "\n"))
+
+(defmethod inline-message ::wrong-size-collection [e]
+  (str "The collection is too small"))
 
 (comment
-  ;; these cases are ambiguous
-  (s/explain-data (s/map-of keyword? ::s/any)
-                  {0 [0]})
+  (let [data {:data-key []}
+        errs (s/explain-data (s/map-of keyword? (s/every integer? :min-count 2))
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil))
+  )
+
+;; ** wrong-count-collection
+
+(derive ::wrong-count-collection ::bad-value)
+
+(defn wrong-count-pred? [pred]
+  (when (and (sequential? pred)
+             (sequential? (nth pred 2 nil)))
+    (let [[=' target-count [count' _]] pred]
+      (when (and (integer? target-count)
+                 (= 'clojure.core/count count')
+                 (= 'clojure.core/=     ='))
+        {::target-count target-count}))))
+
+(defmethod upgrade-to-error-type? ::wrong-count-collection [_ {:keys [pred] :as err}]
+  (when-let [merge-data (wrong-count-pred? pred)]
+    (-> err
+        (merge merge-data)
+        (assoc ::error-type ::wrong-count-collection))))
+
+(defmethod error-message ::wrong-count-collection [{:keys [path pred val reason via in] :as e}]
+  ;; the base case here is an
+  (str "The collection at key "
+       (error-key e)
+       " has the wrong size: " (color (count (:val e)) :bad-value) "\n"
+       "The count should be = to " (color (::target-count e) :good)))
+
+(defmethod inline-message ::wrong-count-collection [e]
+  (str "The collection should have exactly " (::target-count e) " " (pluralize "value" (::target-count e))))
+
+(comment
+  (let [data {:data-key []}
+        errs (s/explain-data (s/map-of keyword? (s/every integer? :count 2))
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil))
+  )
+
+
+;; ** should-not-be-empty
+
+(derive ::should-not-be-empty ::wrong-size-collection)
+
+(defmethod upgrade-to-error-type? ::should-not-be-empty [_ err]
+  (when (and
+         (= (::min-count err) 1)
+         (= (::max-count err) 'Integer/MAX_VALUE))
+    (assoc err ::error-type ::should-not-be-empty)))
+
+(defmethod error-message ::should-not-be-empty [{:keys [path pred val reason via in] :as e}]
+  (str "The value " (color (pr-str val) :bad-value)
+       " at key " (color (error-key e) :focus-key)
+       " should not be empty.\n"
+       (it-should-have-at-least 1 "value")))
+
+(defmethod inline-message ::should-not-be-empty [e]
+  (str "The value at key " (error-key e) " should not be empty"))
+
+(comment
+  (let [data {:data-key []}
+        errs (s/explain-data (s/map-of keyword? (s/every integer? :min-count 1))
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil))
+  )
+
+
+;; ** missing required keys
+;; 
+
+(derive ::missing-required-keys ::bad-value)
+
+(defn missing-keys? [pred]
+  (when ((every-pred sequential?
+                     #(= (first %) 'contains?)
+                     #(keyword? (last %))) pred)
+    {::missing-keys [(last pred)]}))
+
+(defmethod upgrade-to-error-type? ::missing-required-keys [_ {:keys [pred] :as err}]
+  (when-let [merge-data (missing-keys? pred)]
+    (-> err
+        (merge merge-data)
+        (assoc ::error-type ::missing-required-keys))))
+
+(defmethod error-path ::missing-required-keys [err]
+  {:in-path (concat (fix-path err)
+                    (take 1 (::missing-keys err))) 
+   :error-focus :key
+   :missing-key true})
+
+(defmethod error-message ::missing-required-keys [{:keys [path pred val reason via in] :as e}]
+  (when-let [kys (not-empty (::missing-keys e))]
+    (str "Missing required " (pluralize "key" (count kys)) " "
+         (ep/format-seq-with-and kys) " at path "
+         (color (pr-str (error-path-parent e)) :focus-path))))
+
+(defmethod pprint-inline-message ::missing-required-keys [e]
+  (or
+   (and (::file-source e) (ep/pprint-missing-keys-in-file-context e))
+   (ep/pprint-sparse-path (::root-data e)
+                          (error-path-parent e)
+                          (into {}
+                                (map (fn [k]
+                                       [k (str "The required key " (pr-str k) " is missing")]))
+                                (::missing-keys e)))))
+
+(defmethod keys-to-document ::missing-required-keys [e]
+  (when-let [missing (not-empty (::missing-keys e))]
+    (let [typ  (last (:via e))]
+      (look-up-ns-keywords-in-spec typ missing))))
+
+(comment
+  (let [data {}
+        errs (s/explain-data (strict-keys :req-un [::asdf])
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil))
+  )
+
+
+;; ** bad key
+;; this is a case where we have a s/map-of or s/every-kv
+
+(derive ::bad-key ::bad-value)
+
+(eliminate-siblings ::bad-key ::unknown-key) ;; if this isn't an unknown key
+
+;; we are using :in on purpose here 
+(defmethod upgrade-to-error-type? ::bad-key [_ {:keys [in val] :as err}]
+  (when (= [0 val] (take 2 (reverse in)))
+    (assoc err ::error-type ::bad-key)))
+
+(defmethod error-path ::bad-key [err]
+  (-> (default-error-path err)
+      (assoc :error-focus :key)))
+
+(defn bad-key-message [{:keys [path pred val reason via in] :as e}]
+  (str "The key " (color (pr-str (error-key e))
+                         :focus-key)
+       " at " (color (pr-str (error-path-parent e)) :focus-path)
+       " does not conform. "
+       "\n" (ep/format-predicate-str e)))
+
+(defmethod error-message ::bad-key [e]           (bad-key-message e))
+(defmethod error-message ::bad-key-comb-pred [e] (bad-key-message e))
+
+(defn bad-key-inline-message [e]
+  (str "The key " (pr-str (error-key e))
+       " does not conform."))
+
+(defmethod inline-message ::bad-key [e] (bad-key-inline-message e))
+(defmethod inline-message ::bad-key-comb-pred [e] (bad-key-inline-message e))
+
+(comment
+  (let [data {"" 1
+              3 3}                               ;; below is for combined key errors
+        errs (s/explain-data (s/map-of integer? #_(s/or :key keyword? :int integer?)
+                                       integer?)
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil))
+  )
+
+
+
+;; NEXT level is ::unknown-key problems
+
+
+
+;; ** unknown key
+
+(derive ::unknown-key ::bad-value)
+
+;; this only works with the strict-keys implementation
+;; TODO think about getting rid of the strict keys complexity
+;; and just pulling the data out of a pred
+(defmethod upgrade-to-error-type? ::unknown-key [_ err]
+  (when (::unknown-key err)
+    (assoc err ::error-type ::unknown-key)))
+
+(defmethod error-path ::unknown-key [err]
+  {:in-path (concat (fix-path err)
+                    (list (::unknown-key err)))
+   :error-focus :key})
+
+#_(upgrade-error (test-e (strict-keys :opt-un [::fdas]) {:asdf 3}))
+#_ (error-path (upgrade-error (test-e (strict-keys :opt-un [::fdas]) {:asdf 3})))
+
+(defmethod error-message ::unknown-key [{:keys [path pred val reason via in] :as e}]
+  (str "Found unrecognized key " (color (pr-str (::unknown-key e)) :error-key)
+       " at path " (color (pr-str (error-path-parent e)) :focus-path) "\n"
+       ;; doesn't work when there is only one key
+       (if (= 1 (count pred))
+         (str "The only allowed key is: " (pr-str (first pred)) )
+         (str "Must be one of: " (ep/format-seq-with-or pred)))))
+
+(defmethod inline-message ::unknown-key [e]
+  (str "The key " (::unknown-key e) " is unrecognized"))
+
+(defmethod keys-to-document ::unknown-key [e] nil)
+
+(comment
+  (let [data {:abcd 1}                               
+        errs (s/explain-data (strict-keys :opt-un [::fargo])
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil))
+  )
+
+
+;; ** misspelled-key
+;; upon reflection misspelling and wrong keys should have multiple options for correction
+;; we probably should move ::correct-key to ::correct-keys
+
+(derive ::misspelled-key ::unknown-key)
+
+(defmethod upgrade-to-error-type? ::misspelled-key [_ err]
+  (when-let [suggest
+             (and
+              (::keys->specs err)
+              ((some-fn keyword? string? symbol?) (::unknown-key err))
+              (strict-impl/spelling-suggestion
+               (parse/keys-specs->keys-args (::keys->specs err))
+               (:val err)
+               (::unknown-key err)))]
+    (assoc err
+           ::error-type ::misspelled-key
+           ::misspelled-key (::unknown-key err)
+           ::correct-key suggest)))
+
+(defmethod error-message ::misspelled-key [{:keys [path pred val reason via in] :as e}]
+  (str "It's likely that the key " (color (pr-str (::misspelled-key e)) :error-key)
+       " is misspelled. It should probably be "
+       (color (pr-str (::correct-key e)) :correct-key)))
+
+(defn correct-key-message [e]
+  (str "The key " (pr-str (error-key e))
+       " should probably be " (pr-str (::correct-key e))))
+
+(defmethod inline-message ::misspelled-key [e]
+  (correct-key-message e))
+
+(defn correct-keys-to-document [e]
+  (when-let [spec-key (get (::keys->specs e)
+                           (::correct-key e))]
+    [spec-key]))
+
+(defmethod keys-to-document ::misspelled-key [e]
+  (correct-keys-to-document e))
+
+(comment
+  (let [data {:farg 1}                               
+        errs (s/explain-data (strict-keys :opt-un [::fargo])
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil)
+    (keys-to-document (first (prepare-errors errs
+                                             data
+                                             nil)))
+    )
+  )
+
+;; ** wrong-key
+;; upon reflection misspelling and wrong keys should have multiple options for correction
+;; we probably should move ::correct-key to ::correct-keys
+;; but the scores of the top choices should be close and in order 
+
+(derive ::wrong-key ::unknown-key)
+
+;; depends on previous error-upgrade failing
+(eliminate-siblings ::wrong-key ::misspelled-key)
+
+(defmethod upgrade-to-error-type? ::wrong-key [_ err]
+  (when-let [suggest
+             (and
+              (::keys->specs err)
+              (strict-impl/replacement-suggestion
+               (parse/keys-specs->keys-args (::keys->specs err))
+               (:val err)
+               (::unknown-key err)))]
+    (assoc err
+           ::error-type ::wrong-key
+           ::wrong-key (::unknown-key err)
+           ::correct-key suggest)))
+
+(defmethod error-message ::wrong-key [{:keys [path pred val reason via in] :as e}]
+  (str "The key " (color (pr-str (error-key e)) :error-key)
+       " is unrecognized. Perhaps you meant "
+       (color (pr-str (::correct-key e)) :correct-key)
+       "?"))
+
+(defmethod inline-message ::wrong-key [e]
+  (correct-key-message e))
+
+(defmethod keys-to-document ::wrong-key [e]
+  (correct-keys-to-document e))
+
+(comment
+  (let [data {:forest {:id "asdf"
+                       :source-paths ["src"]
+                       :compiler {:output-to "main.js"}}}
+        errs (s/explain-data (strict-keys
+                              :opt-un [:strictly-specking.test-schema/build-config])
+                             data)]
+    (dev-print errs
+               data
+               nil)
+    (prepare-errors errs
+                    data
+                    nil)
+
+    (keys-to-document (first (prepare-errors errs
+                    data
+                    nil)))
+
+    )
   
-  (fix-error-path {:path [0], :pred keyword?, :val 0, :via [], :in [0 0]} {0 [0]})
-  
-  (s/explain-data (s/map-of keyword? ::s/any)
-                  {:asdf 1
-                   1 [1]})
+  )
 
-  (fix-error-path {:path [0], :pred keyword?, :val 1, :via [], :in [1 0]}
-                  {:asdf 1
-                   1 [1]})
+;; ** misplaced key
+;; 
 
-;; these work
-  
-  (s/explain-data (s/every (s/tuple keyword? (s/every (s/tuple keyword? integer?))))
-                  {:asdf {:asdf ""}})
+(derive ::misplaced-key ::unknown-key)
 
-  (fix-error-path {:path [1 0], :pred keyword?, :val 3, :via [], :in [0 1 0 0]}
-                  {:asdf {3 1}})
+(eliminate-siblings ::misplaced-key ::misspelled-key ::wrong-key)
 
-  (fix-error-path {:path [1 1], :pred integer?, :val "", :via [], :in [0 1 0 1]}
-                  {:asdf {:asdf ""}})
+(defn misplaced-key-error? [err]
+  ;; need the root
+  ;; perhaps the first of :via??
+  (when-let [ky (and (first (:via err)) (::unknown-key err))]
+    (when-let [possible-paths
+               (not-empty
+                (set
+                 (path-match/filter-possbile-path-choices
+                  err
+                  (parse/find-key-path-without-ns (first (:via err)) ky))))]
+      (let [[suggested-path-reified
+             suggested-path] (path-match/best-possible-path possible-paths (::root-data err))]
+        {::suggested-path suggested-path-reified
+         ::document-keys [(-> suggested-path last :ky-spec)]}))))
 
-  (s/explain-data (s/map-of keyword? (s/map-of keyword? integer?))
-                  {:asdf {3 1}})
+(defmethod upgrade-to-error-type? ::misplaced-key [_ err]
+  (when-let [merge-data (misplaced-key-error? err)]
+    (-> err
+        (merge merge-data)
+        (assoc ::error-type ::misplaced-key))))
 
-  (fix-error-path {:path [1 0], :pred keyword?, :val 3, :via [], :in [:asdf 1 3 0]}
-                  {:asdf {3 1}})
+(defmethod error-message ::misplaced-key [e]
+  (str "The key " (color (pr-str (::unknown-key e)) :focus-key)
+       " at " (color (pr-str (error-path-parent e)) :focus-path)
+       " is on the wrong path."))
 
-  (s/explain-data (s/map-of keyword? (s/map-of keyword? integer?))
-                  {:asdf {:asdf ""}})
+(defmethod inline-message ::misplaced-key [e]
+  (str "The key " (pr-str (-> e ::unknown-key)) " has been misplaced"))
 
-  (fix-error-path {:path [1 1], :pred integer?, :val "", :via [], :in [:asdf 1 :asdf 1]}
-                  {:asdf {:asdf ""}}))
+(defmethod keys-to-document ::misplaced-key [e]
+  (::document-keys e))
 
-;; upgrade to bad keys
 
-(defn upgrade-to-bad-key [e]
-  (if (and (map-tuple-path-element? (last (butlast (:in e))))
-           (= 0 (last (:in e))))    
-    (assoc e ::error-type ::bad-key)
-    e))
+;; * error combination
 
-(defn fix-map-paths [errors]
-  (map
-   #(if (map-tuple-path? (:in %))
-      (-> %
-          upgrade-to-bad-key
-          (update-in [:in] fix-map-path))
-      %)
-   errors))
-
-#_(fix-map-paths ['{:path [0],
-                    :pred keyword?,
-                    :val 3,
-                    :via [],
-                    :in [[:strictly-specking.core/tuple-map-key 3] 0]}])
-
-;; *** parse out and added missing keys data on error
-
-(defn add-required-keys [error]
-  (if-let [missing-required-keys (missing-keys error)]
-    (assoc error ::missing-keys (missing-keys error))
-    error))
-
-;; *** apply initial data transforms on errors 
-
-(defn filter-errors [problems]
-  (->> problems
-       #_(map (fn [[k v]] (assoc v :path k)))
-       (map add-required-keys)
-       (map add-error-type)))
-
-;; *** combine errors for single location
+;; ** combine errors for single location
 ;; Sometimes there are multiple errors on the same path location
 
+;; TODO :in is still being used here,
+;; need to verify that it isn't causing problems
 (defn combined-or-pred [errors]
   (let [errors-to-comb
         (->> errors
@@ -364,18 +851,18 @@
   (let [errors-to-comb
         (->> errors
              (filter #(= (::error-type %) ::bad-key))
-             (group-by :in)
+             (group-by (comp :in-path ::error-path))
              (filter #(< 1 (count (second %))))
              (map (fn [[_ errors]]
                     (assoc (first errors)
                            :pred (cons 'or (map :pred errors))
                            :path (cons ::combined-path (map :path errors))
                            ::error-type ::bad-key-comb-pred))))
-        paths (set (map :in errors-to-comb))]
-    (concat (filter #(not (paths (:in %))) errors)
+        paths (set (map (comp :in-path ::error-path) errors-to-comb))]
+    (concat (filter #(not (paths (-> % ::error-path :in-path))) errors)
             errors-to-comb)))
 
-;; *** combine missing-keys errors
+;; ** combine missing-keys errors
 ;; missing keys for the same location can be combined
 
 (defn combined-missing-keys [errors]
@@ -392,13 +879,9 @@
     (concat (filter #(not (paths (:in %))) errors)
             errors-to-comb)))
 
-;; *** corrections overide missing
+;; ** corrections overide missing
 ;; if there is an error with a ::correct-key in it eliminate any ::missing-required-keys reference
-
-(defn l [t x]
-  (prn t x)
-  x)
-
+;; TODO still using in here, need to review
 (defn corrections-overide-missing-required [errors]
   (if-let [corrected-key-errors (not-empty (filter ::correct-key errors))]
     (let [key-paths  (set (map (juxt ::correct-key :in)
@@ -419,1025 +902,65 @@
       fixed-errs)
     errors))
 
-
-;; *** upgrade :unknown-key to misplaced key
-
-(comment
-  
-  (def test-error
-    '{:path
-      [:cljsbuild
-       :builds
-       :builds-map
-       1
-       :figwheel
-       :figwheel-client-options
-       :unknown-key
-       :source-map],
-      :pred
-      #{:on-message :on-compile-warning :on-jsload :websocket-host :reload-dependents
-        :on-compile-fail :debug :heads-up-display :build-id :websocket-url :before-jsload
-        :load-warninged-code :eval-fn :devcards :retry-count :autoload :open-urls :on-cssload},
-      :val
-      {:websocket-host "localhost",
-       :on-jsload example.core/fig-reload,
-       :on-message example.core/on-message,
-       :open-urls
-       ["http://localhost:3449/index.html"
-        "http://localhost:3449/index.html"
-        "http://localhost:3449/index.html"
-        "http://localhost:3449/index.html"
-        "http://localhost:3449/index.html"],
-       :source-map true,
-       :debug true},
-      :via
-      [:strictly-specking.test-schema/lein-project-with-cljsbuild
-       :cljsbuild.lein-project.require-builds/cljsbuild
-       :cljsbuild.lein-project/cljsbuild
-       :strictly-specking.test-schema/builds
-       :strictly-specking.test-schema/build-config
-       :strictly-specking.test-schema/figwheel],
-      :in [:cljsbuild :builds :dev :figwheel],
-      :strictly-specking.core/unknown-key :source-map,
-      :strictly-specking.core/error-type :strictly-specking.core/unknown-key,
-      :strictly-specking.core/root-data
-      {:cljsbuild
-       {:builds
-        {:dev
-         {:id "example-admin",
-          :source-paths ["src" "dev" "tests" "../support/src"],
-          :assert true,
-          :figwheel
-          {:websocket-host "localhost",
-           :on-jsload example.core/fig-reload,
-           :on-message example.core/on-message,
-           :open-urls
-           ["http://localhost:3449/index.html"
-            "http://localhost:3449/index.html"
-            "http://localhost:3449/index.html"
-            "http://localhost:3449/index.html"
-            "http://localhost:3449/index.html"],
-           :source-map true,
-           :debug true},
-          :compiler
-          {:main example.core,
-           :asset-path "js/out",
-           :output-to "resources/public/js/example.js",
-           :output-dir "resources/public/js/out",
-           :libs ["libs_src" "libs_sscr/tweaky.js"],
-           :foreign-libs [{:file "foreign/wowza.js", :provides ["wowzacore"]}],
-           :optimizations :whitespace}}}}}})
-
-  (def test-error2
-    '{:path [:cljsbuild :builds :builds-map 1 :compiler :unknown-key :figwheel],
-      :pred
-      #{:output-dir :closure-defines :static-fns :dump-core :externs :ups-libs :optimize-constants
-        :cache-analysis :modules :elide-asserts :language-out :optimizations :recompile-dependents
-        :source-map-path :closure-extra-annotations :ups-foreign-libs :parallel-build :verbose
-        :preloads :source-map-inline :anon-fn-naming-policy :output-to :source-map-timestamp
-        :preamble :asset-path :print-input-delimiter :output-wrapper :ups-externs :hashbang
-        :source-map :watch-fn :foreign-libs :libs :target :pseudo-names :devcards :external-config
-        :compiler-stats :main :pretty-print :closure-output-charset :language-in :warning-handlers
-        :emit-constants},
-      :val
-      {:main example.core,
-       :asset-path "js/out",
-       :output-to "resources/public/js/example.js",
-       :output-dir "resources/public/js/out",
-       :libs ["libs_src" "libs_sscr/tweaky.js"],
-       :foreign-libs [{:file "foreign/wowza.js", :provides ["wowzacore"]}],
-       :optimizations :whitespace,
-       :figwheel
-       {:websocket-host 1 #_"localhost",
-        :on-jsload example.core/fig-reload,
-        :on-message example.core/on-message,
-        :open-urls
-        ["http://localhost:3449/index.html"
-         "http://localhost:3449/index.html"
-         "http://localhost:3449/index.html"
-         "http://localhost:3449/index.html"
-         "http://localhost:3449/index.html"],
-        :source-map true,
-        :debug true}},
-      :via
-      [:strictly-specking.test-schema/lein-project-with-cljsbuild
-       :cljsbuild.lein-project.require-builds/cljsbuild
-       :cljsbuild.lein-project/cljsbuild
-       :strictly-specking.test-schema/builds
-       :strictly-specking.test-schema/build-config
-       :strictly-specking.test-schema/compiler],
-      :in [:cljsbuild :builds :dev :compiler],
-      :strictly-specking.core/unknown-key :figwheel,
-      :strictly-specking.core/error-type :strictly-specking.core/unknown-key,
-      :strictly-specking.core/root-data
-      {:cljsbuild
-       {:builds
-        {:dev
-         {:id "example-admin",
-          :source-paths ["src" "dev" "tests" "../support/src"],
-          :assert true,
-          :compiler
-          {:main example.core,
-           :asset-path "js/out",
-           :output-to "resources/public/js/example.js",
-           :output-dir "resources/public/js/out",
-           :libs ["libs_src" "libs_sscr/tweaky.js"],
-           :foreign-libs [{:file "foreign/wowza.js", :provides ["wowzacore"]}],
-           :optimizations :whitespace,
-           :figwheel
-           {:websocket-host "localhost",
-            :on-jsload example.core/fig-reload,
-            :on-message example.core/on-message,
-            :open-urls
-            ["http://localhost:3449/index.html"
-             "http://localhost:3449/index.html"
-             "http://localhost:3449/index.html"
-             "http://localhost:3449/index.html"
-             "http://localhost:3449/index.html"],
-            :source-map true,
-            :debug true}}}}}}})
-  )
-
-;; 1. the key is recognized among the global keys and the value fuzzy conforms
-
-;; or the key is recognized as a misspelled global key and the value fuzzy conforms
-
-;; 2. we find a likely path to the recognized key 
-
-;; does this path already exist?
-;; TODO does the :val fuzzy-conform?
-(defn filter-possbile-path-choices [e possible-paths]
-  ;; first is the value valid for this key-spec?
-  (if-let [paths (not-empty (filter (fn [x] (s/valid? (-> x last :ky-spec)
-                                                      (get (:val e)
-                                                           (::unknown-key e))))
-                                    possible-paths))]
-    paths
-    ;; if not is this a map and does it fuzzy conform
-    (if-let [score-paths (not-empty (keep (fn [x]
-                                            (let [vl (get (:val e)
-                                                          (::unknown-key e))]
-                                              (when (map? vl)
-                                                [(strict-impl/fuzzy-conform-score-spec-key
-                                                  (-> x last :ky-spec)
-                                                  vl)
-                                                 x])))
-                                          possible-paths))]
-      (->> score-paths
-           (filter #(> (first %) 0.5))
-           (sort-by (comp - first))
-           ;; dropping the score here is probably a bad idea
-           ;; as we are ranking the paths again later
-           (map second))
-      [])))
-
-;; when there is more than one path let's look at the existing
-;; structure to see if we can match it
-
-(defn path-match-helper [possible-path kv-list]
-  (->> kv-list
-      (mapcat
-       #(map (partial cons (first %))
-             (path-match (rest possible-path) (second %))))
-      distinct))
-
-(defn path-match [possible-path data]
-  (let [p (first possible-path)
-        match-next (partial path-match-helper possible-path)]
-    (if (or (nil? data) (nil? p))
-      [[]]
-      (or
-       (condp = (:ky p)
-         ::int-key (when (sequential? data)
-                     (match-next (map-indexed vector data)))
-         ::pred-key (when (not= (:ky-pred-desc p) ::s/any)
-                      (match-next data))
-         (and (map? data) (contains? data (:ky p))
-              (match-next (select-keys data [(:ky p)]))))
-       [[]]))))
-
-(defn rank-path-matches [possible-path data]
-  (->> (path-match possible-path data)
-       (filter #(not= (last %)
-                      (-> possible-path last :ky)))
-       (map (fn [p] [(/ (count p) (count possible-path)) p possible-path]))
-       (sort-by (comp - first))))
-
-(defn path-matches [possible-paths data]
-  (->> possible-paths
-       (mapcat
-        #(rank-path-matches % data))))
-
-(defn fill-out-path [partial-path possible-path]
-  [(concat partial-path
-          (map
-           :ky
-           (drop (count partial-path) possible-path)))
-   possible-path])
-
-(defn best-possible-path [possible-paths data]
-  (->> (path-matches possible-paths data)
-       (sort-by (comp - first))
-       first
-       rest
-       (apply fill-out-path)))
-
-
-
-;; TODO we can also sample from the original structure
-(defn generate-path-structure
-  "Generates a data structure to demonstrate where to place a key"
-  [data path v]
-  (let [p (first path)]
-    (cond
-      (or (empty? path) (nil? path)) v
-      (nil? data)
-      (let [nxt (generate-path-structure nil (rest path) v)]
-        (if (or (integer? p) (= ::int-key p))
-          [nxt]
-          (hash-map ((some-fn {::pred-key :__any_keyword} identity) p) nxt)))
-      :else
-      (when-let [f (cond
-                     ;; This is where you would do sampling
-                     (map? data)       #(hash-map p %)
-                     (vector? data)     vector
-                     (set? data)        (comp set vector)
-                     (sequential? data) list)]
-        (f (generate-path-structure (get data p) (rest path) v))))))
-
-#_(generate-path-structure  {:a {:b [{:c {}}]}} [:a :b 1 :c ::int-key ::pred-key] 555)
-
-#_(best-possible-path
-   ['({:ky-spec :strictly-specking.test-schema/cljsbuilds, :ky :cljsbuild}
-      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
-      {:ky :strictly-specking.core/pred-key,
-       :ky-pred-desc :strictly-specking.test-schema/string-or-named}
-      {:ky-spec :strictly-specking.test-schema/figwheel, :ky :figwheel})
-    
-    '({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild, :ky :cljsbuild}
-      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
-      {:ky :strictly-specking.core/int-key}
-      {:ky-spec :strictly-specking.test-schema/figwheel, :ky :figwheel})]
-   '{:cljsbuild
-     {:builds
-      {:dev
-       1
-       :cow 1}}}
- )
-
-(defn upgrade-to-misplaced-error [err]
-  ;; need the root
-  ;; perhaps the first of :via??
-  (if-let [ky (and (first (:via err)) (::unknown-key err))]
-    (if-let [possible-paths
-             (not-empty
-              (filter-possbile-path-choices
-               err
-               (parse/find-key-path-without-ns (first (:via err)) ky)))]
-      (let [[suggested-path-reified
-             suggested-path] (best-possible-path possible-paths (::root-data err))]
-        (assoc err
-               ::suggested-path suggested-path-reified
-               ::document-keys [(-> suggested-path last :ky-spec)]
-               ::error-type ::misplaced-key))      
-      err)
-    err))
-
-#_(parse/find-key-path-without-ns :cljsbuild.lein-project.require-builds/cljsbuild
-                                  :figwheel)
-
-#_(s/describe :strictly-specking.test-schema/builds)
-
-#_ (upgrade-to-misplaced-error test-error2)
-
-(defn upgrade-to-misplaced-errors [errors]
-  (map #(if (= (::error-type %) ::unknown-key)
-          (upgrade-to-misplaced-error %) %) errors))
-
-;; *** TODO specific paths filter out general paths if something fails
+;; ** specific paths filter out general paths if something fails
 ;; at a deeper path it takes precedence over and filters out more
 ;; general paths this implies that the more general path succeeded in
 ;; a certain branch and that path is the one that is failing
 
 (defn sub-path? [sub-path* path]
   (and (<= (count sub-path*) (count path))
-       (reduce #(and %1 %2) (map = path sub-path*))))
+       (reduce #(and %1 %2) true (map = path sub-path*))))
 
 (defn specific-paths-filter-general [errors]
   (->> errors
-       (sort-by (comp - count :in))
-       (reduce (fn [accum {:keys [in] :as err}]
-                 (if (some #(sub-path? in %) (keys accum))
-                   accum
-                   (assoc accum in err))) {})
+       (sort-by (comp - count :in-path ::error-path))
+       (reduce (fn [accum err]
+                 (let [in-path (:in-path (::error-path err))]
+                   (if (some #(sub-path? in-path %) (keys accum))
+                     accum
+                     (assoc accum in-path err)))) {})
        vals))
 
-#_(specific-paths-filter-general [{:in [1 2 3 ]} {:in [1 2 3 4]}])
-
-
-#_(->> terrors
-      ::s/problems
-      filter-errors
-      sort-errors
-      combined-or-pred
-      corrections-overide-missing-required
-      #_(map error-message)
-      #_(map println))
-
-#_(filter-errors (::s/problems terrors))
-
-
-;; ** sorting errors
-;;  give types to errors
+;; * sorting errors
 ;;  sort them by importance
 
-(def ^:dynamic *error-precedence*
-  [::misspelled-key
-   ::wrong-key
-   ::missing-required-keys
-   ::attach-reason
-   ::unknown-key
-   ::should-not-be-empty
-   ::bad-key-comb-pred
-   ::bad-key   
-   ::bad-value-comb-pred
-   ::bad-value])
-
 (defn sort-errors [errors]
-  (sort-by
-   (fn [v] (let [pos (.indexOf *error-precedence* (::error-type v))]
-             (if (neg? pos) 10000 pos))) errors))
+  (let [order (vec (reverse (total-order)))]
+    (sort-by
+     (fn [v] (let [pos (.indexOf order (::error-type v))]
+               (if (neg? pos) 10000 pos))) errors)))
 
-;; still rough
+;; * prepare errors
+;; this brings all the functionality above together
+
+;; this is still rough
 ;; need a notion of a source ;; pure data vs. file source
+
 (defn prepare-errors [explain-data validated-data file]
   (->> explain-data
        ::s/problems
-       filter-errors
+       #_filter-errors
        (map #(assoc % ::root-data validated-data))
        (map #(if file (assoc % ::file-source file) %))
-       fix-map-paths
-       upgrade-to-misplaced-errors
+       (map upgrade-error)
+       #_fix-map-paths
+       
+       #_upgrade-to-misplaced-errors
        sort-errors
+       (map #(assoc % ::error-path (error-path %)))
        combined-missing-keys
        combined-or-pred
+       combined-or-key-pred
        corrections-overide-missing-required
        specific-paths-filter-general))
 
-;; ** error-message function
-;; this will provide a more meaningful description of whats gone wrong
-;; will delegete to a ns/key based error message if available
+;; * error to final display data
 
-;; *** TODO this needs to be refined to the default error
-;; must keep in mind that the error is going to be displayed below
-(defn message-default-str
-  [{:keys [path pred val reason via in] :as prob}]
-  (with-out-str
-    (when-not (empty? in)
-      (print "In:" in ""))
-    (print "val: ")
-    (pr val)
-    (print " fails")
-    (when-not (empty? via)
-      (print " spec:" (last via)))
-    (when-not (empty? path)
-      (print " at:" path))
-    (print " predicate: ")
-    (pr pred)
-    (when reason (print ", " reason))
-    (doseq [[k v] prob]
-      (when-not (#{:pred :path :val :reason :via :in} k)
-        (print "\n\t" k " ")
-        (pr v)))
-    (newline)))
 
-;; TODO fill this out
-(def ^:dynamic *symbol-type-table*
-  '{non-blank-string? NonBlankString
-    string?  String
-    symbol?  Symbol
-    keyword? Keyword
-    vector?  Vector
-    sequential? Sequence
-    map?     Map
-    integer? Integer
-    number?  Number})
-
-(def type-lookup->str (some-fn *symbol-type-table* pr-str))
-
-(defn resovlable-predicate? [x]
-  (or (*symbol-type-table* x)
-   (and
-    (sequential? x)
-    (= 1 (count x))
-    (*symbol-type-table* (first x)))))
-
-(defn pred-symbol->str [x]
-  (if-let [res (resovlable-predicate? x)]
-    res
-    (type-lookup->str x)))
-
-(defn seq-with-first [x pred]
-  (and (sequential? pred) (= x (first pred))))
-
-(defn format-predicate-str [{:keys [pred val]}]
-  (cond
-    (or
-     (seq-with-first 'or pred)
-     (seq-with-first 'some-fn pred))
-    (str (if (every? *symbol-type-table* (rest pred))
-           "It should be one of: "
-           "It should satisfy one of: ")
-         (string/join " | "
-                      (map #(color % :good-pred)
-                           (map (some-fn *symbol-type-table* str) (rest pred)))))
-    (seq-with-first '+ pred)
-    (str "It should be a non-empty sequence of: " (color
-                                                   (pred-symbol->str (rest pred))
-                                                   :good-pred))
-    (seq-with-first '* pred)
-    (str "It should be a sequence of: " (color (pred-symbol->str (rest pred)) :good-pred))
-    :else
-    (str (if (resovlable-predicate? pred)
-           "It should be a "
-           "It should satisfy ")
-         (color (pred-symbol->str pred) :good-pred))))
-
-(defn format-seq-with-end [s end]
-  (let [f (color (pr-str (first s)) :focus-key)]
-    (condp = (count s)
-      1 f
-      2 (str f " " end " "(color (pr-str (second s)) :focus-key))
-      (str f ", " (format-seq-with-end (rest s) end)))))
-
-(defn format-seq-with-and [s]
-  (format-seq-with-end s 'and))
-
-(defn format-seq-with-or [s]
-  (format-seq-with-end s 'or))
-
-(defn format-summarized-value [v]
-  (string/trim-newline
-   (with-out-str
-     (binding [*print-length* 4
-               *print-level* 2]
-       (pp/pprint v)))))
-
-;; *** TODO figure out how to identify where to point to
-
-;; we need to abstract how we choose a key for a given error
-;; might not need this yet
-
-(defn parent [e]
-  (get-in (::root-data e) (butlast (:in e))))
-
-(defn current [e]
-  (get-in (::root-data e) (:in e)))
-
-(defn parent-pred [pred]
-  #(pred (parent %)))
-
-(def parent-sequence? (parent-pred sequential?))
-(def parent-vector? (parent-pred vector?))
-(def parent-map? (parent-pred map?))
-(def parent-set? (parent-pred set?))
-(def parent-coll? (parent-pred coll?))
-
-(defmulti error-message ::error-type)
-
-(defmethod error-message :default [e]
-  (message-default-str e #_(select-keys e [:pred :path :val :reason :via :in])))
-
-(defn parent-type-str [e]
-  (cond
-    (parent-map? e)      "Map"
-    (parent-set? e)      "Set"
-    (parent-vector? e)   "Vector"
-    (parent-sequence? e) "Sequence"))
-
-(defn format-bad-value [val]
-  (let [formatted (color (format-summarized-value val) :bad-value)]
-    (if (coll? val)
-      (str "\n" (indent-lines 2 formatted))
-      formatted)))
-
-(defn bad-value-message [{:keys [path pred val reason via in] :as e}]
-  (let [k (last in)]
-    (cond
-      (parent-map? e)
-      (str "The key " (color (pr-str k) :focus-key)
-           " at " (color (pr-str (vec in)) :focus-path)
-           " has a non-conforming value: " (format-bad-value val)
-           "\n" (format-predicate-str e))
-      (parent-coll? e)
-      (str "The " (parent-type-str e)
-           " at " (color (pr-str (vec (butlast in))) :focus-path)
-           " contains a non-conforming value: " (format-bad-value val)
-           "\n" (format-predicate-str e))
-      :else
-      (str "The key " (color (pr-str k) :focus-key)
-           " has a non-conforming value: " (format-bad-value val)
-           "\n" (format-predicate-str e)))))
-
-(defmethod error-message ::bad-value [e] (bad-value-message e))
-(defmethod error-message ::bad-value-comb-pred [e] (bad-value-message e))
-
-(defn bad-key-message [{:keys [path pred val reason via in] :as e}]
-  (let [k (last in)]
-    (str "The key " (color (pr-str k) :focus-key)
-         " at " (color (pr-str (vec in)) :focus-path)
-         " does not conform. "
-         "\n" (format-predicate-str e))))
-
-(defmethod error-message ::bad-key [e]           (bad-key-message e))
-(defmethod error-message ::bad-key-comb-pred [e] (bad-key-message e))
-
-(defmethod error-message ::misplaced-key [e]
-  (let [k (::unknown-key e)]
-    (str "The key " (color (pr-str k) :focus-key)
-         " at " (color (pr-str (vec (:in e))) :focus-path)
-         " is on the wrong path. "
-         "\n")))
-
-(defmethod error-message ::attach-reason [e]
-  (str "Error at "
-       (color (pr-str (vec (:in e))) :focus-path) "\n"
-       (:reason e "")))
-
-(defmethod error-message ::should-not-be-empty [{:keys [path pred val reason via in] :as e}]
-  (str "The value " (color (pr-str val) :bad-value)
-       " at key " (color (last in) :focus-key)
-       " should not be empty.\n"))
-
-(defmethod error-message ::unknown-key [{:keys [path pred val reason via in] :as e}]
-  (str "Found unrecognized key " (color (::unknown-key e) :error-key)
-       " at path " (color (pr-str in) :focus-path) "\n"
-       "Must be one of: " (format-seq-with-or pred)))
-
-(defmethod error-message ::missing-required-keys [{:keys [path pred val reason via in] :as e}]
-  (when-let [kys (not-empty (::missing-keys e))]
-    (if (< 1 (count kys))
-      (str "Missing required keys " (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path))
-      (str "Missing required key "  (format-seq-with-and kys) " at path " (color (pr-str in) :focus-path)))))
-
-;; *** TODO ::wrong-key
-;; upon reflection misspelling and wrong keys should have multiple options for correction
-;; we probably should move ::correct-key to ::correct-keys
-;; but the scores of the top choices should be close and in order 
-
-(defmethod error-message ::wrong-key [{:keys [path pred val reason via in] :as e}]
-  (str "The key " (color (::wrong-key e) :error-key)
-       " is unrecognized. Perhaps you meant "
-       (color (::correct-key e) :correct-key)
-       "?"))
-
-;; *** TODO ::misspelled-key
-;; upon reflection misspelling and wrong keys should have multiple options for correction
-;; we probably should move ::correct-key to ::correct-keys
-
-(defmethod error-message ::misspelled-key [{:keys [path pred val reason via in] :as e}]
-  (str "The key " (color (::misspelled-key e) :error-key)
-       " is misspelled. It should probably be "
-       (color (::correct-key e) :correct-key)))
-
-;; *** TODO: fill in the rest of the error types
-
-(defmulti inline-message ::error-type)
-
-(defmethod inline-message :default [e] (str "The key " (-> e :in last) " has a problem"))
-(defmethod inline-message ::bad-value [e]
-  (str "The key " (-> e :in last) " has a non-conforming value"))
-
-(defmethod inline-message ::misplaced-key [e]
-  (str "The key " (-> e ::unknown-key) " has been misplaced"))
-
-(defmethod inline-message ::attach-reason [e]
-  (:reason e " error here"))
-
-(defmethod inline-message ::bad-value-comb-pred [e]
-  (str "The key " (-> e :in last) " has a non-conforming value"))
-
-(defmethod inline-message ::bad-key [e]
-  (str "The key " (-> e :in last) " does not conform."))
-
-(defmethod inline-message ::bad-key-comb-pred [e]
-  (str "The key " (-> e :in last) " does not conform."))
-
-(defmethod inline-message ::should-not-be-empty [e]
-  (str "The key " (-> e :in last) " should not be empty"))
-
-(defmethod inline-message ::unknown-key [e]
-  (str "The key " (::unknown-key e) " is unrecognized"))
-
-;; this is interestion I need to add a key
-#_(defmethod inline-message ::missing-required-keys [e]
-  (str "XXXXX "
-       (-> e :in last)
-       " is missing"))
-
-(defmethod inline-message ::wrong-key [e]
-  (str "The key " (-> e ::wrong-key) " should probably be " (::correct-key e)))
-
-(defmethod inline-message ::misspelled-key [e]
-  (str "The key " (-> e ::misspelled-key) " should probably be " (::correct-key e)))
-
-;; *** use pprint to print contextual errors
-
-(defn pprint-sparse-path
-  ([data path key-message-map colors]
-   (->>
-    (pp/with-pprint-dispatch annot/error-path-dispatch
-     (pp/pprint
-      (annot/annotate-path-only
-       data
-       path
-       {:abbrev true
-        :comments (into {}
-                        (map (fn [[k message]]
-                               [k
-                                (merge {:key-colors     [:error-key]
-                                        :value-colors   [:reset]
-                                        :comment-colors [:pointer]
-                                        :comment message}
-                                       colors)])
-                             key-message-map))})))
-    with-out-str
-    (indent-lines 2)
-    println))
-  ([data path key-message-map]
-   (pprint-sparse-path data path key-message-map {})))
-
-;; *** file contextual errors
-
-;; really need to move this towards the same interface as above
-;; if there is a file on the error we will display it in context of the file
-
-(defn pprint-in-file [file base-path key-message-map]
-  (let [[k message] (first key-message-map) 
-        path        (conj (vec base-path) k)]
-    (when-let [{:keys [line column value path loc]}
-               (edn-string-nav/get-path-in-clj-file path file)]
-      (println "File:" (str file))
-      (cp/print-message-in-context-of-file file line column message)
-      true)))
-
-#_(edn-string-nav/get-path-in-clj-file [0] "tester.edn")
-
-(defn pprint-in-context
-  ([e base-path key-message-map]
-   (pprint-in-context e base-path key-message-map {}))
-  ([e base-path key-message-map colors]
-   (or (and
-        (::file-source e)
-        (pprint-in-file (::file-source e) base-path key-message-map))
-     (pprint-sparse-path (::root-data e) base-path key-message-map colors))))
-
-;; *** pprint inline message
-;;
-;; this should dispatch and display in file context if there is file
-;; information on the error
-
-;; ***** TODO the real abstraction here is a way to determine
-;; the focus-key and the path to the containing structure
-;; in other words we need an abstraction of a path
-;; and wether the path points to key endpoint of the path
-;; or the value on the path
-
-;; this ends up being different for each error
-
-;; I can imagine a multimethod that returns this
-;; {:path [] :focus (or :ky :vl)}
-;; where the last component of the path is the focus key
-
-(defmulti pprint-inline-message ::error-type)
-
-(defmethod pprint-inline-message :default [e]
-  (pprint-in-context e (butlast (:in e))
-                     {(last (:in e)) (inline-message e)}
-                     {:key-colors [:highlight]
-                      :value-colors [:bad-value]}))
-
-(defmethod pprint-inline-message ::unknown-key [e]
-  (pprint-in-context e (:in e)
-                     {(::unknown-key e) (inline-message e)}))
-
-;; attach-reason provides a focus key when it's ambigious which
-;; key is 
-(defmethod pprint-inline-message ::attach-reason [{:keys [in focus-key] :as e}]
-  (let [[path ky] (if focus-key
-                    [in focus-key]
-                    [(butlast in) (last in)])]
-    (pprint-in-context e path
-                       {ky (inline-message e)})))
-
-(defmethod pprint-inline-message ::bad-key [e]
-  (pprint-in-context e (butlast (:in e))
-                     {(last (:in e)) (inline-message e)}))
-
-(defmethod pprint-inline-message ::bad-key-comb-pred [e]
-  (pprint-in-context e (butlast (:in e))
-                     {(last (:in e)) (inline-message e)}))
-
-(defmethod pprint-inline-message ::misplaced-key [e]
-  (pprint-in-context e (:in e)
-                     {(::unknown-key e) (inline-message e)}))
-
-(defmethod pprint-inline-message ::misspelled-key [e]
-  (pprint-in-context e (:in e)
-                     {(::misspelled-key e) (inline-message e)}))
-
-(defmethod pprint-inline-message ::wrong-key [e]
-  (pprint-in-context e (:in e)
-                     {(::wrong-key e) (inline-message e)}))
-
-(defn pprint-missing-keys-context [e]
-  (pprint-sparse-path (reduce #(update-in %1 (vec (:in e))
-                                          (fn [x]
-                                            ;; order matters for display purposes
-                                            (->> x
-                                                 seq
-                                                 (cons [%2 '_____])
-                                                 (into {}))))
-                              (::root-data e)
-                              (::missing-keys e))
-                      (:in e)
-                      (into {}
-                            (map (fn [k]
-                                   [k (str "The required key " (pr-str k) " is missing")]))
-                            (::missing-keys e))))
-
-(defn insert-missing-keys [formatted-lines kys line column]
-  (let [length (apply max (map (comp count str) kys))]
-    (concat
-     (take-while #(= (first %) :line) formatted-lines)
-     (let [r (drop-while #(= (first %) :line) formatted-lines)]
-       (concat
-        [(->> (first r) rest (cons :line) vec)]
-        (mapv (fn [k] [:error-line nil
-                       (str (cp/blanks column)
-                            (format (str "%-" length "s  <- missing required key") k))]) kys)
-        (rest r))))))
-
-(defn inline-missing-keys? [e]
-  (let [m (get-in (::root-data e) (:in e))]
-    (when (<= 2 (count m))
-      (let [[first-key second-key] (keys m)
-            loc-data1 (edn-string-nav/get-path-in-clj-file (conj (vec (:in e)) first-key)
-                                                           (::file-source e))
-            loc-data2 (edn-string-nav/get-path-in-clj-file (conj (vec (:in e)) second-key)
-                                                           (::file-source e))]
-        (when (not= (:line loc-data1) (:line loc-data2))
-          loc-data1)))))
-
-(defn pprint-missing-keys-in-file-context [e]
-  (let [m (get-in (::root-data e) (:in e))]
-    (if-let [{:keys [line column value path loc]}
-             (inline-missing-keys? e)]
-      (do
-        (println "File:" (str (::file-source e)))
-        (-> (cp/fetch-lines (::file-source e))
-            (cp/number-lines)
-            (cp/insert-message line column
-                               (str "Map is missing required key"
-                                    (if (= 1 (count (::missing-keys e)))
-                                      "" "s")))
-            (insert-missing-keys (::missing-keys e) line column )
-            (cp/extract-range-from-center line 10)
-            cp/trim-blank-lines
-            cp/blank-space-trim
-            cp/format-line-numbers
-            cp/color-lines
-            cp/print-formatted-lines)
-        true)
-      (pprint-in-file (::file-source e)
-                      (butlast (:in e))
-                      {(last (:in e))
-                       (str "Map is missing required key"
-                            (if (= 1 (count (::missing-keys e)))
-                              (str ": " (pr-str (first (::missing-keys e))))
-                              (str "s: " (string/join ", " (map pr-str (::missing-keys e))))
-                              ))}))))
-
-(defmethod pprint-inline-message ::missing-required-keys [e]
-  (or
-   (and (::file-source e) (pprint-missing-keys-in-file-context e))
-   (pprint-missing-keys-context e)))
-
-;; * docs on keys
-;;
-
-;; our own private registry for data on keys
-
-(defonce ^:private registry-ref (atom {}))
-
-(defn def-key-doc [k d]
-  (swap! registry-ref assoc-in [k ::doc] d))
-
-(defn key-doc [k]
-  (get-in @registry-ref [k ::doc]))
-
-
-;; ** A def-key construct
-
-;; Creating a def-key contruct to allow for simultaneous defining of
-;; specs and docs, this will also check for duplicate keys
-
-(defonce ^:private registry-ref (atom {}))
-
-(defn key-doc
-  "Given a spec key returns a String of documentation if it has been provided"
-  [k]
-  (get-in @registry-ref [k ::doc]))
-
-(defn add-key-doc [k doc]
-  {:pre [(keyword? k) (string? doc)]}
-  (swap! registry-ref assoc-in [k ::doc] doc))
-
-(defn key-docs-for-explain-data
-  "Given explain data from a failed spec provides a Map of key -> doc"
-  [explain-data]
-  (->> explain-data
-       ::s/problems
-       vals
-       (keep (comp (juxt identity key-doc) last :via))
-       (filter second)
-       (into {})))
-
-;; ** Checking for duplicate keys
-
-;; As a spec gets larger its very easy to duplicate a key and break
-;; everything. It's nice to have a safe guard in place.
-
-;; can use this to test for duplicate definitions This works fine with
-;; a reloading workflow as long as you reload the whole file.
-
-(def ^:private duplicate-keys (atom {}))
-
-(defn duplicate-key-check* [k]
-  (when (get @duplicate-keys k)
-    (throw (ex-info "Error duplicate key spec" {:k k})))
-  (swap! duplicate-keys assoc k true)
-  k)
-
-;; a development helper
-(defn reset-duplicate-keys
-  "Empties the duplicate keys atom. Only intended for interactive development."
-  [] (reset! duplicate-keys {}))
-
-;; parse out args
-(def def-key-arg-spec (s/cat :k (s/and keyword? namespace)
-                             :spec ::s/any
-                             :doc (s/? non-blank-string?)))
-
-(defmacro def-key
-  "Defines a spec via clojure.spec/def, checks for duplicates and adds optional documentation.
-
-Usage:
-(def-key ::my-keyword-key string? \"Optional documentation\")"
-  [& args]
-  (let [{:keys [k spec doc] :as res} (s/conform def-key-arg-spec args)]
-    (if-not (and k spec)
-      (throw (ex-info
-              (with-out-str (s/explain def-key-arg-spec args))
-              (or (s/explain-data def-key-arg-spec args) {})))
-      `(do
-         (duplicate-key-check* ~k)
-         (s/def ~k ~spec)
-         ~(when doc
-            `(add-key-doc ~k ~doc))))))
-
-;; *** keys to document
-;;
-;; this should dispatch and display in file context if there is file
-;; information on the error
-
-;; **** different errors need different strategies
-;; we need to turn un-namespaced keywords in to ns-keywords
-;; for documentation lookup
-
-(defn search-for-key-in-via [via k]
-  (some #(when (or (= (name %) (name k))
-                   (= k %))
-           %) (reverse via)))
-
-(defn get-key-to-document [e]
-  (let [{:keys [via in]} e]
-    (->> (reverse in)
-         (filter keyword?)
-         (some #(search-for-key-in-via via %)))))
-
-#_(get-key-to-document '{:path [:source-paths],
-                         :pred string?,
-                         :val 1,
-                         :via [:fig-opt/build-config :build-config/source-paths :build-config/source-paths],
-                         :in [:source-paths 0],
-                         :strictly-specking.core/error-type :strictly-specking.core/bad-value,
-                         :strictly-specking.core/root-data {},
-                         :strictly-specking.core/file-source "asdf"})
-
-(defn look-up-ns-keywords-in-spec
-  "Fetches the child ns-keys of a spec given the un-namespaced keys."
-  [typ kys]
-  (when-let [desc (try (s/describe typ) (catch Throwable e nil))]
-    (when-let [path-elems (not-empty (parse/possible-child-keys typ))]
-      (->> path-elems
-           (filter (fn [{:keys [ky ky-spec]}] ((set kys) ky)))
-           (map :ky-spec)))))
-
-(defmulti keys-to-document ::error-type)
-
-(defmethod keys-to-document :default [e]
-  (or (::document-keys e)
-      (when-let [k (get-key-to-document e)]
-        [k])))
-
-(defmethod keys-to-document ::unknown-key [e] nil)
-
-(defmethod keys-to-document ::attach-reason [e]
-  (when-let [typ (last (:via e))]
-    (look-up-ns-keywords-in-spec typ (when-let [x (:focus-key e)]
-                                       [x]))))
-
-;; TODO no need to look up the key here
-(defmethod keys-to-document ::misplaced-key [e]
-  (::document-keys e))
-
-(defmethod keys-to-document ::misspelled-key [e] #_(correct-keys-to-doc e)
-  (or (and (::correct-key-spec e) [(::correct-key-spec e)])
-      (when-let [typ (last (:via e))]
-        (look-up-ns-keywords-in-spec typ (when-let [x (::correct-key e)]
-                                           [x])))))
-
-(defmethod keys-to-document ::wrong-key [e] #_(correct-keys-to-doc e)
-  (or (and (::correct-key-spec e) [(::correct-key-spec e)])
-      (when-let [typ (last (:via e))]
-        (look-up-ns-keywords-in-spec typ (when-let [x (::correct-key e)]
-                                           [x])))))
-
-(defmethod keys-to-document ::missing-required-keys [e]
-  (when-let [missing (not-empty (::missing-keys e))]
-    (let [typ  (last (:via e))]
-      (look-up-ns-keywords-in-spec typ missing))))
-
-(comment
-  (keys-to-document '{:path [],
-                      :pred (and (contains? % :id) (contains? % :source-paths)),
-                      :val {:compiler 1, :asdfasdf [1 2]},
-                      :via [:fig-opt/builds :fig-opt/builds :fig-opt/build-config :fig-opt/build-config],
-                      :in [0],
-                      :strictly-specking.core/missing-keys [:id :source-paths],
-                      :strictly-specking.core/error-type :strictly-specking.core/missing-required-keys,
-                      :strictly-specking.core/root-data [{:compiler 1, :asdfasdf [1 2]}],
-                      :strictly-specking.core/file-source "tester.edn"})
-
-  (keys-to-document '{:strictly-specking.core/root-data {},
-                      :path [:misspelled-key :source-path],
-                      :strictly-specking.core/error-type :strictly-specking.core/misspelled-key,
-                      :strictly-specking.core/misspelled-key :source-path,
-                      :pred #{:asdfasdf :source-paths :assert :id},
-                      :via [:fig-opt/build-config],
-                      :val {:id 1, :source-path [1 2]},
-                      :strictly-specking.core/file-source "asdf",
-                      :strictly-specking.core/correct-key :source-paths,
-                      :in []})
-
-  (keys-to-document '{:path (:strictly-specking.core/combined-path [:id :string] [:id :keyword]),
-                      :pred (or string? keyword?),
-                      :val 1,
-                      :via [:fig-opt/build-config :build-config/id],
-                      :in [:id],
-                      :strictly-specking.core/error-type :strictly-specking.core/bad-value-comb-pred,
-                      :strictly-specking.core/root-data {},
-                      :strictly-specking.core/file-source "asdf"})
-  
-  (keys-to-document '{:path [:source-paths],
-                      :pred string?,
-                      :val 1,
-                      :via [:fig-opt/build-config :build-config/source-paths :build-config/source-paths],
-                      :in [:source-paths 0],
-                      :strictly-specking.core/error-type :strictly-specking.core/bad-value,
-                      :strictly-specking.core/root-data {},
-                      :strictly-specking.core/file-source "asdf"})
-
- (keys-to-document '{:path [:cljsbuild],
-                     :pred (contains? % :builds),
-                     :val {}
-                     ,
-                     :via
-                     [:strictly-specking.test-schema/lein-project-with-cljsbuild
-                      :cljsbuild.lein-project.require-builds/cljsbuild],
-                     :in [:cljsbuild],
-                     :strictly-specking.core/missing-keys [:builds],
-                     :strictly-specking.core/error-type :strictly-specking.core/missing-required-keys
-})
-  
-  )
-
-(defn fetch-docs [kys]
-  (->>  kys
-       (keep (fn [k] (when-let [d (key-doc k)]
-                       [k d])))
-       (into {})))
+(defn l [t e]
+  (print t "")
+  (pp/pprint e)
+  e)
 
 (defmulti update-display-data (comp ::error-type :error))
 
@@ -1448,12 +971,11 @@ Usage:
                            (get-in (::root-data err)
                                    (butlast suggested-path))]
                     (if (map? parent-collection)
-                      [(butlast suggested-path) (into {}
-                                                      (cons [final-key (:val err)]
-                                                            (seq parent-collection)))]
+                      [(butlast suggested-path) (assoc parent-collection
+                                                       final-key (:val err))]
                       [suggested-path (:val err)])
                     [suggested-path (:val err)])]
-    (generate-path-structure (::root-data err) path vl)))
+    (path-match/generate-path-structure (::root-data err) path vl)))
 
 (defmethod update-display-data ::misplaced-key [disp-data]
   (let [err (:error disp-data)]
@@ -1461,20 +983,19 @@ Usage:
            :extra-explain (str "The " (::unknown-key err)
                                " key should probably be placed like so: ")
            :extra-diagram (with-out-str
-                            (pprint-sparse-path
+                            (ep/pprint-sparse-path
                              (generate-suggested-path-data
                               err
                               (::suggested-path err)
                               (::unknown-key err))
-                             #_(generate-path-structure
+                             ;; very unhappy with this
+                             (path-match/generate-path-structure-path
                               (::root-data err)
-                              (::suggested-path err)
-                              (:val err))
-                             (butlast (::suggested-path err))
+                              (butlast (::suggested-path err)))
                              {(::unknown-key err)
                               (str "The key " (::unknown-key err)
-                                                      " should probably be placed in this map")}
-                                                {:key-colors [:good]})))))
+                                   " should probably be placed like this")}
+                             {:key-colors [:good]})))))
 
 ;; TODO the raw line data may be more appropirate to ship over
 ;; the wire to a client
@@ -1483,9 +1004,11 @@ Usage:
    {:error error
     :message (error-message error)
     :error-in-context (with-out-str (pprint-inline-message error))
-    :path (:in error)
+    :path (-> error ::error-path :in-path)
     :doc-keys (keys-to-document error)
     :docs (not-empty (fetch-docs (keys-to-document error)))}))
+
+;; * actually printing of the error
 
 (defn test-print [error-data]
   (println (color "---------------------------------\n" :header))
@@ -1522,13 +1045,8 @@ Usage:
     (println "\n"))
   (println (color "---------------------------------\n" :footer)))
 
-#_ (prepare-errors (s/explain-data :fig-opt/build-config {:id 1
-                                                          :source-path [1 2]})
-                   {}
-                   "asdf")
-
 (defn dev-print [explain-data data-to-test file-name]
-  (with-ansi
+  (without-ansi
     (->> 
      (prepare-errors explain-data data-to-test file-name)
      (map error->display-data)
@@ -1536,16 +1054,362 @@ Usage:
      (mapv test-print))))
 
 (comment
-  (def structer (read-string (slurp "tester.edn")))
+  (def data-from-file (read-string (slurp "dev-resources/test_edn/cljsbuild.edn")))
 
-  (def terr (s/explain-data :fig-opt/builds structer))
+  (dev-print
+   (s/explain-data :strictly-specking.test-schema/lein-project-with-cljsbuild
+                   data-from-file)
+   data-from-file
+   "dev-resources/test_edn/cljsbuild.edn")
 
-  #_(prepare-errors  terr structer "tester.edn")
-  (dev-print terr structer nil #_"tester.edn")
+  (def errr (first (prepare-errors (s/explain-data :strictly-specking.test-schema/lein-project-with-cljsbuild
+                                          data-from-file)
+                          data-from-file
+                          "dev-resources/test_edn/cljsbuild.edn")))
+  
 
+
+  (generate-suggested-path-data
+                              errr
+                              (::suggested-path errr)
+                              (::unknown-key errr))
+
+  (mapv #(path-match/path-match  %  data-from-file)
+        
+        
+   '[#_({:ky-spec :figwheel.lein-project/figwheel, :ky :figwheel}
+      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+      {:ky :strictly-specking.core/int-key}
+      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
+     ({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild,
+       :ky :cljsbuild}
+      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+      {:ky :strictly-specking.core/pred-key,
+       :ky-pred-desc :strictly-specking.test-schema/string-or-named}
+      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
+     #_({:ky-spec :figwheel.lein-project/figwheel, :ky :figwheel}
+      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+      {:ky :strictly-specking.core/pred-key,
+       :ky-pred-desc :strictly-specking.test-schema/string-or-named}
+      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
+     ({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild,
+       :ky :cljsbuild}
+      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+      {:ky :strictly-specking.core/int-key}
+      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})]
+
+   )
+
+
+
+  
+  
+
+  
   )
 
+;; * additional specs
 
+;; ** Strict-keys Spec
+
+(defmacro strict-keys
+  "This is a spec that has the same signature as the clojure.spec/keys spec.
+  The main difference is that it fails on keys that are not the 
+  [:req :opt :req-un :opt-un] specifications.
+
+  This spec will provide an explanation for each unknown key."
+  [& args]
+  ;; check the args with s/keys
+  ;; `(s/keys ~@args)
+  (let [form (macroexpand `(s/keys ~@args))]
+    `(strictly-specking.strict-keys/strict-mapkeys-impl
+      (strictly-specking.parse-spec/parse-keys-args ~@args) ~form)))
+
+
+;; ** Attach Reason Spec
+
+;; attach-reason is a spec that attaches a :reason to a failing specs
+;; explain-data this :reason is printed out as part of the message
+;; generated by clojure.spec/explain
+
+(defn ammend-explain-impl [parent-spec {:keys [reason] :as additional-info}]
+  {:pre [(or (nil? reason) (string? reason))]}
+  (reify
+    clojure.lang.IFn
+    (invoke [this x] (parent-spec x))
+    clojure.spec/Spec
+    (conform* [_ x] (s/conform* parent-spec x))
+    (unform* [_ x] (s/unform* parent-spec x))
+    (explain* [_ path via in x]
+      (when-let [err (first (s/explain* parent-spec path via in x))]
+        [(cond-> err
+           (::attach-reason additional-info)
+           (update-in [:reason] #(if %
+                                   (str (::attach-reason additional-info) "\n - " %)
+                                   (::attach-reason additional-info)))
+           true (merge additional-info))]))
+    ;; These can be improved
+    (gen* [_ a b c]
+      (s/gen* parent-spec a b c))
+    (with-gen* [_ gfn]
+      (s/with-gen* parent-spec gfn))
+    (describe* [_] (s/describe* parent-spec))))
+
+(defmacro attach-reason [reason spec & additional-info]
+  `(ammend-explain-impl (s/spec ~spec)
+                        ~(into {::attach-reason reason}
+                               (apply hash-map additional-info))))
+
+#_(s/explain-data (attach-reason "asdf" (fn [x] false)
+                               :focus-key :asdf)
+                {})
+
+;; ** Attach Warning Spec
+
+;; There are situations that we just want to warn about. Here is a spec
+;; that will print out a warning and will always pass.
+
+(defn attach-warning-impl [message-or-fn parent-spec]
+  {:pre [(or (fn? message-or-fn) (string? message-or-fn))]}
+  (reify
+    clojure.lang.IFn
+    (invoke [this x] (parent-spec x))
+    clojure.spec/Spec
+    (conform* [_ x]
+      (if (s/valid? parent-spec x)
+        (s/conform* parent-spec x)
+        (do
+          (println "Spec Warning: " (if (string? message-or-fn)
+                                      message-or-fn
+                                      (message-or-fn x)))
+          x)))
+    (unform* [_ x] x)
+    (explain* [_ path via in x] nil)
+    ;; These can be improved
+    (gen* [_ a b c]
+      (s/gen* parent-spec a b c))
+    (with-gen* [_ gfn] 
+      (s/with-gen* parent-spec gfn))
+    (describe* [_] (cons 'attach-warning (s/describe* parent-spec)))))
+
+(defmacro attach-warning [reason spec]
+  `(attach-warning-impl ~reason (s/spec ~spec)))
+
+
+
+
+
+
+
+;; * thoughts
+;; ** Data needs for spec failure error expression
+;; *** top level needs
+;; **** display the error in situ
+
+;; its important the display the error in it the context of its
+;; original data structure
+
+;; this is more powerful if the data structure is a in source form
+;; such as edn in a file
+
+;; not having an edn structure we are only left with displaying it
+;; in the context of pure data.
+
+;; its also important to be able to display relevant documentation
+;; for various keys involved in the error
+
+;; This brings up the following needs:
+;; ***** the original data structure
+;; ***** the source be it file or some string
+;; ***** the path to the error
+;; this path needs to work function with the original data structure
+;; ***** when the last element of the path is a key to a map
+;; we need to know if it points to the value or the key itself
+
+;; **** types of errors that can occur
+;; ***** non conforming value error
+;; the value at the path does not comply
+
+;; A value error needs
+;; - the path that ends at the key that points at the value
+;; - the knowledge that the path points to the value
+;; - what was wrong with the value - the specs that failed
+;; - the data to look up the docs for that key
+
+;; path to error value
+
+;; this is a global need for all errors
+;; - a message that clarifies the error given the above data
+
+;; but in a way everything is a value error at some level
+;; if there is a key pointing to a value that the error is in.
+
+;; For example if a map has an unknown-key, the map in its
+;; entirety could be the bad value for a parent key
+;; the some errors can be made more specific by upgrading
+;; them to a more specific error.
+
+;; -----
+;; there will be more specific bad value errors
+;; ::should-not-be-empty
+;; ::collection-wrong-size
+;; these will be available for different concrete errors
+;; that caused by built in macro predicates
+;; -----
+
+;; here are some upgraded errors
+;; ***** missing required key error
+;; a required key is missing from the map
+;;
+;; this is an upgrade of a bad value error on the parent
+;; need to detect this error and upgrade
+
+
+;; ****** TODO
+;; error-path-type
+;; { :in-path [] ;; a vector path that works with get-in on the root datastructure 
+;;   :error-focus :value ;; or :key
+;;   :missing-key true }
+;; error-parent-path always butlast of :path
+;; method error-path
+;; method error-docs
+;; method keys-to-document
+
+
+
+
+;; 
+;; methods
+;; - context-print-path
+;;   again path itself holds notion of pointing to the key or value
+;; - bad-value-path
+;;   path to bad value
+;; - focus-keys
+;;   the keys in the collection that have the focus
+
+;; really this notion breaks down in many cases
+;; can we have an error with several erroneous keys in a single erroneous value?
+;; Then we will want a notion of a path to the parent collection
+;; and a notion of a set of eronneous keys
+;; OR instead of combining errors a notion of merging them into the same report
+;; so that we can display them in the same structure
+;; part of merging would be collision
+
+
+;; notion of printing path
+
+;; needs
+;; - predicate to spot this bad value error
+;; - upgrade this error path by appending the missing key
+;; - an indicator that the key is the focus of the error
+;; - document the key that is required
+;;   this means we need the ns-key to look up documentation
+;; - upgrade the data-structure visualizaion to display the missing key
+;;  - in the case of an edn structure add some keys and values
+;;  - in the case of a file source insert some lines with the missing key values
+;;
+;; the strange printing needs of this error point out a need for a in
+;; context printing hook
+
+;; ***** unknown-key
+;; an unknown-key is present in a map
+;;
+;; this is an upgrade from a bad value error
+
+;; - need to display list of correct keys
+;; - need a predicate to detect this error type
+;; - need to upgrade the path:
+;;   - need a path to the key
+;;   - need an indicator that this is a key error
+;; - *no* documentation is needed perhaps documentation on the
+;; parent key
+
+;; in a certain mode this would just be awarning
+
+;; ***** mispelled key error
+;; a key has been determined to be a likely mispelling
+
+;; this is an upgrade from an unkown-key error
+;; it will use the corrected paths
+
+;; we need a predicate to detect this error
+;;   - this predicate needs the other possible keys in the map
+;;   - it needs to know the keys in the map already
+;;   - it needs to be able to validate the value against the
+;;     alternate key suggestions
+;;   - the :val and the map of keys->ns-key-specs can provide the
+;;     bulk of these data needs
+;;   - can possibly use the parent-spec to find these keys (last :via)
+
+;; need to document the suggestion
+
+;; should really consider displaying serveral suggestions
+
+;; should consider that this could just be a warning in a certain mode
+;; the warning would warn about unknown keys and provide the possible misspellings
+
+;; ***** wrong key error
+
+;; very similar to the mispelled key and is only tried if no mispelling is found
+;; it just determines suggestions based on the shap of the unkown keys value
+;; trying to find the best match in the
+
+;; again its an evolution of an unknown-key
+;; it will reuse the path information in it
+
+;; we need a predicate to detect this error
+;;   - this predicate needs the other possible keys in the map
+;;   - it needs to know the keys in the map already
+;;   - it needs to be able to validate the value against the
+;;     alternate key suggestions
+;;   - the :val and the map of keys->ns-key-specs can provide the
+;;     bulk of these data needs
+;;   - can possibly use the parent-spec to find these keys (last :via)
+
+;; this predicate would return an error modified with the correct information
+;;    the name of the correct-key (we already know the focus-key)
+
+;; need to document the suggestion(s)
+;; 
+
+;; ***** misplaced key
+;; this is an error that occurs when the key likey belongs somewhere
+;; else in the datastructure
+
+;; this is an upgrade of an unknown-key
+
+;; this is only tried if a local mispelling error and a local wrong key error
+;; hasn't been detected
+
+;; need a predicate to detect this error
+;; this predicate needs to do enough computation that it's probably better to dual purpose
+;; this predicate such that it returns a modified error with added information
+;;   
+;;
+
+;; ***** mispelled misplaced key
+
+
+;; ***** global wrong key
+;; the key has a wrong value but the value has sufficietn complexity
+;; and validates correrctly against another position
+
+
+;; ***** wrong placement of structure
+;; key has wrong value but the value has sufficient complexity
+;; and belongs somewhere else
+
+;; need to be able to turn up and down the level of validation errors
+;; just listing the errors might not work because there are evolutions
+;; of errors
+
+
+
+;; **** Notes
+;; looks like we may just be able to have an indicator of a :focus-shift
+;; that points one more level deep in the associative structure
+;; and indicates if its a key problem "or a value problem" (TODO it might never
+;; be a valure problem)
 
 
 
@@ -1593,63 +1457,7 @@ Usage:
 ;;   in its current value, in conjuntion with the rest of the configuration
 
 
-(defn init-test-rules []
-  (s/def :fig-opt/housers1 string?)
-  (s/def :fig-opt/housers2 string?)
-  (s/def :fig-opt/housers3 string?)
-  
-  (s/def :fig-opt/house (strict-keys
-                         :opt-un [:fig-opt/housers1 
-                                  :fig-opt/housers2 
-                                  :fig-opt/housers3
-                                  :fig-opt/car1]))
-  
-  (s/def :fig-opt/car1 string?)
-  (s/def :fig-opt/car2 string?)
-  (s/def :fig-opt/car3 string?)
-  
-  (s/def :fig-opt/car (strict-keys
-                       :opt-un [:fig-opt/car1
-                                :fig-opt/car2
-                                :fig-opt/car3]))
-  
-  (s/def :fig-opt/real (strict-keys
-                        :opt-un [:fig-opt/car
-                                 :fig-opt/house]))
-  
-  (s/def :build-config/id (s/or :string string? :keyword keyword?))
-  (s/def :build-config/source-paths (s/+ string?))
-  (s/def :build-config/asdfasdf (s/* string?))  
-  (s/def :build-config/assert #(or (true? %) (false? %)))
-  (s/def :fig-opt/build-config (strict-keys :req-un [
-                                                     :build-config/id
-                                                     :build-config/source-paths]
-                                            :opt-un [:build-config/assert
-                                                     :build-config/asdfasdf]))
 
-  (s/def :fig-opt/loose-build-config (s/keys :req-un [
-                                                      :build-config/id
-                                                      :build-config/source-paths]
-                                             :opt-un [:build-config/assert
-                                                      :build-config/asdfasdf]))
-  
-  
-  (s/def :fig-opt/http-server-root string?)
-  (s/def :fig-opt/server-port      integer?)
-  (s/def :fig-opt/server-ip        string?)
-  (s/def :fig-opt/builds           (s/+ :fig-opt/build-config))
-  
-  
-  (s/def :project-top/figwheel (strict-keys
-                                :opt-un [:fig-opt/http-server-root
-                                         :fig-opt/server-port
-                                         :fig-opt/server-ip]
-                                :req-un [:fig-opt/builds]))
-  
-  
-  )
-
-#_(init-test-rules)
 
 
 

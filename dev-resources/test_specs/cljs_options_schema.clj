@@ -9,6 +9,8 @@
                                    non-blank-string?] :as ss]
    [clojure.test :refer [deftest is testing]]))
 
+#_ (remove-ns 'strictly-specking.cljs-options-schema)
+
 ;; for development
 (ss/reset-duplicate-keys)
 
@@ -821,70 +823,3 @@ See the Closure Compiler Warning wiki for detailed descriptions.")
                            (not (opt-none? optimizations)))))
                    :focus-key :source-map)
    ))
-
-(do
-
-  (s/conform ::compiler-options {:asset-path "asdf/asdf"})
-  (s/explain ::compiler-options {:source-map "asdf" :optimizations :none})
-  (s/explain ::compiler-options {:source-map false :optimizations :simple})
-
-  #_(key-docs-for-explain-data (s/explain-data ::compiler-options {:output-wrapper 1}))
-
-  (def not-blank? (complement string/blank?))
-
-  (deftest verify-warnings-and-reasons
-    ;; no warnings or errors on a perectly valid empty options
-    (is (s/valid? ::compiler-options {}))
-    (is (string/blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"}))))
-
-    (testing "warnings produce warnings and are still valid"
-      ;; no warning produced
-      ;; :asset-path
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
-                                                                  :asset-path "asdf/asdf"}))))
-      (is (s/valid? ::compiler-options {:output-to "main.js"
-                                        :asset-path "asdf/asdf"}))
-
-      ;; pseudo-names
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
-                                                                  :pseudo-names true}))))
-      (is (s/valid? ::compiler-options {:output-to "main.js"
-                                        :pseudo-names true}))
-
-      ;; preamble
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
-                                                                  :preamble ["asdf"] :optimizations :advanced}))))
-      (is (s/valid? ::compiler-options {:output-to "main.js"
-                                        :preamble ["asdf"] :optimizations :advanced}))
-
-      ;; hash-bang
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
-                                                                  :hashbang true}))))
-      (is (s/valid? ::compiler-options {:output-to "main.js"
-                                        :hashbang true}))
-
-      ;; clojure-defines
-      (is (not-blank? (with-out-str (s/valid? ::compiler-options {:output-to "main.js"
-                                                                  :closure-defines {'goog.DEBUG false}
-                                                                  :optimizations :whitespace}))))
-      (is (s/valid? ::compiler-options {:output-to "main.js"
-                                        :closure-defines {'goog.DEBUG false}
-                                        :optimizations :whitespace}))
-
-      )
-
-    (testing "fail on attach-reason predicates"
-      (is (not (s/valid? ::compiler-options {:output-to "main.js"
-                                             :closure-defines {'goog.DEBUG false}})))
-      (is (not (s/valid? ::compiler-options {:output-to "main.js"
-                                             :source-map "asdf"})))
-      (is (not (s/valid? ::compiler-options {:output-to "main.js"
-                                             :source-map false :optimizations :advanced})))
-      )
-
-    (is (s/valid? ::compiler-options {:output-to "main.js"
-                                      :optimizations :advanced})))
-
-  (clojure.test/run-tests 'strictly-specking.cljs-options-schema)
-
-)

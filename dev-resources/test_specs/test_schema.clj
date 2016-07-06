@@ -7,12 +7,15 @@
                                    non-blank-string?]
     :as ss]))
 
+#_ (remove-ns 'strictly-specking.test-schema)
+
 ;; for development - not a crime if it happens in production
 (ss/reset-duplicate-keys)
 
 (def-key ::string-or-symbol (some-fn non-blank-string? symbol?))
 
 (def-key ::string-or-named  (some-fn non-blank-string? keyword? symbol?))
+
 
 #_(s/conform ::string-or-named :asdfasdf)
 
@@ -194,7 +197,7 @@ to false.  Default: true
 
   :ansi-color-output false")
 
-(def-key ::hawk-options (ss/map-of #{:watcher} #{:barbary :java :polling})
+(def-key ::hawk-options (s/map-of #{:watcher} #{:barbary :java :polling})
 
   "If you need to watch files with polling instead of FS events. This can
 be useful for certain docker environments.
@@ -264,10 +267,10 @@ Or you can specify which suffixes will cause the reloading
 ;; configuration validation
 (def-key ::repl-listen-port      integer?)
 (def-key ::repl-launch-commands
-  (ss/map-of ::string-or-named
+  (s/map-of ::string-or-named
             (s/every ::string-or-named :into [] :kind sequential?)))
 (def-key ::test-commands
-  (ss/map-of ::string-or-named
+  (s/map-of ::string-or-named
             (s/every ::string-or-named :into [] :kind sequential?)))
 (def-key ::crossovers            (s/every ::s/any :into [] :kind sequential?))
 (def-key ::crossover-path        (s/every ::s/any :into [] :kind sequential?))
@@ -282,7 +285,9 @@ Or you can specify which suffixes will cause the reloading
 (def-key ::builds
   (s/or                               ;; wait until merge works
    :builds-vector (s/every ::build-config-require-id :min-count 1 :into [] :kind sequential?)
-   :builds-map  (ss/non-empty-map-of ::string-or-named ::build-config))
+   :builds-map  (s/every-kv ::string-or-named ::build-config
+                            :kind map?
+                            :min-count 1))
   "A Vector or Map of ClojureScript Build Configurations.
 
   :builds [{:id \"dev\"

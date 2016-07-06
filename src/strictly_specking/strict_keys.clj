@@ -81,7 +81,9 @@
 (defn score-suggestion [k->s map-x ky [suggested-key score]]
   (let [key-val  (get map-x ky)
         key-spec (k->s suggested-key)
-        valid    (s/valid? key-spec key-val)]
+        valid    (or (and (spec-from-registry key-spec)
+                          (s/valid? key-spec key-val))
+                     true)]
     [suggested-key
      (cond-> (/ score 10)
        ;; TODO: I don't think this is neccessary at all
@@ -333,7 +335,7 @@
 
 ;; strict-keys
 
-(defn strict-mapkeys-impl [{:keys [known-keys k->s] :as spec-key-data} keys-spec]
+(defn strict-mapkeys-impl [{:keys [known-keys k->s keys->specs] :as spec-key-data} keys-spec]
   {:pre [(set? known-keys)]}
   (let [strict (s/spec-impl known-keys #(every? known-keys (keys %))
                             nil nil)]
@@ -364,6 +366,11 @@
                       (filter (complement known-keys))
                       (mapv
                        (fn [unknown-key]
+                         (assoc exp-data
+                                :path (conj (:path exp-data) :unknown-key unknown-key)
+                                :strictly-specking.core/keys->specs keys->specs
+                                :strictly-specking.core/unknown-key unknown-key))
+                       #_(fn [unknown-key]
                          (if-let [suggest (spelling-suggestion spec-key-data x unknown-key)]
                            (assoc exp-data
                                   :path (conj (:path exp-data) :misspelled-key unknown-key)

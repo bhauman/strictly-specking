@@ -21,6 +21,12 @@
 (defn spec-from-registry [spec-key]
   (get (s/registry) spec-key))
 
+
+(defn keys-specs->keys-args [keys->specs]
+  {:keys->specs keys->specs
+   :k->s        #(or (keys->specs %) %)
+   :known-keys  (set (keys keys->specs))})
+
 ;; TODO the shape of parsed keys args is redundant and doesn't
 ;; capture required keys information
 (defn parse-keys-args [& {:keys [req opt req-un opt-un]}]
@@ -31,6 +37,7 @@
     {:keys->specs keys->specs
      :k->s        #(or (keys->specs %) %)
      :known-keys  (set known-keys)}))
+
 
 
 (declare poss-path)
@@ -167,7 +174,7 @@
                     (path-set-cons {:ky :strictly-specking.core/pred-key
                                     :ky-pred-desc key-predicate}
                                    (poss-path (nth desc 2))))
-          'every-ky (let [key-predicate (second desc)]
+          'every-kv (let [key-predicate (second desc)]
                       (path-set-cons {:ky :strictly-specking.core/pred-key
                                       :ky-pred-desc key-predicate}
                                      (poss-path (nth desc 2))))        
@@ -229,6 +236,25 @@
 
 #_(find-key-path-without-ns :strictly-specking.test-schema/compiler
                           :source-map)
+
+;; TODO this is a test
+#_(find-key-path-without-ns :strictly-specking.test-schema/lein-project-with-cljsbuild
+                            :figwheel)
+;; result
+#_ #{({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild, :ky :cljsbuild}
+     {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+     {:ky :strictly-specking.core/pred-key,
+      :ky-pred-desc :strictly-specking.test-schema/string-or-named}
+     {:ky-spec :strictly-specking.test-schema/figwheel, :ky :figwheel})
+    ({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild, :ky :cljsbuild}
+     {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+     {:ky :strictly-specking.core/int-key}
+     {:ky-spec :strictly-specking.test-schema/figwheel, :ky :figwheel})
+    ({:ky-spec :figwheel.lein-project/figwheel, :ky :figwheel})}
+
+
+#_(s/describe :strictly-specking.test-schema/builds)
+
 
 #_(s/describe (s/every-kv keyword? ::s/any))
 
