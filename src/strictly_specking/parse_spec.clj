@@ -1,7 +1,8 @@
 (ns strictly-specking.parse-spec
   (:require
    [clojure.set :as set]
-   [clojure.spec :as s]))
+   [clojure.spec :as s]
+   [strictly-specking.fuzzy :refer [similar-key]]))
 
   ;; we are dealing with a datatype
   ;; a list of paths Monoid
@@ -234,11 +235,11 @@
    (path-predicate #(= (name (first %)) (name to)))
    (s/describe from)))
 
-
 ;; this only works for the name part
 (defn find-key-path-like-key [from to]
   (poss-path
-   (path-predicate #(= (name (first %)) (name to)))
+   (path-predicate #(similar-key (keyword (name (first %)))
+                                 to))
    (s/describe from)))
 
 #_(find-key-path-without-ns :strictly-specking.test-schema/compiler
