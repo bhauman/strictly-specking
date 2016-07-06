@@ -346,9 +346,9 @@ of thie error element."
 (defmethod error-message ::bad-value-comb-pred [e] (bad-value-message e))
 
 (defmethod inline-message ::bad-value [e]
-  (str "The value at key " (error-key e) " has a non-conforming value"))
+  (str "The value at key " (error-key e) " doesn't conform"))
 (defmethod inline-message ::bad-value-comb-pred [e]
-  (str "The value at key " (error-key e) " has a non-conforming value"))
+  (str "The value at key " (error-key e) " doesn't conform"))
 
 (defmethod pprint-inline-message :default [e]
   (ep/pprint-in-context e (error-path-parent e)
@@ -798,10 +798,10 @@ of thie error element."
   (when-let [ky (and (first (:via err)) (::unknown-key err))]
     (when-let [possible-paths
                (not-empty
-                (path-match/filter-possbile-path-choices
-                 err
-                 (parse/find-key-path-without-ns (first (:via err)) ky)))]
-      (prn possible-paths)
+                (set
+                 (path-match/filter-possbile-path-choices
+                  err
+                  (parse/find-key-path-without-ns (first (:via err)) ky))))]
       (let [[suggested-path-reified
              suggested-path] (path-match/best-possible-path possible-paths (::root-data err))]
         {::suggested-path suggested-path-reified
@@ -956,6 +956,12 @@ of thie error element."
 
 ;; * error to final display data
 
+
+(defn l [t e]
+  (print t "")
+  (pp/pprint e)
+  e)
+
 (defmulti update-display-data (comp ::error-type :error))
 
 (defmethod update-display-data :default [disp-data] disp-data)
@@ -982,14 +988,13 @@ of thie error element."
                               err
                               (::suggested-path err)
                               (::unknown-key err))
-                             #_(generate-path-structure
+                             ;; very unhappy with this
+                             (path-match/generate-path-structure-path
                               (::root-data err)
-                              (::suggested-path err)
-                              (:val err))
-                             (butlast (::suggested-path err))
+                              (butlast (::suggested-path err)))
                              {(::unknown-key err)
                               (str "The key " (::unknown-key err)
-                                   " should probably be placed in this map")}
+                                   " should probably be placed like this")}
                              {:key-colors [:good]})))))
 
 ;; TODO the raw line data may be more appropirate to ship over
@@ -1056,12 +1061,50 @@ of thie error element."
                    data-from-file)
    data-from-file
    "dev-resources/test_edn/cljsbuild.edn")
-  
-  (::suggested-path
-   (first (prepare-errors (s/explain-data :strictly-specking.test-schema/lein-project-with-cljsbuild
+
+  (def errr (first (prepare-errors (s/explain-data :strictly-specking.test-schema/lein-project-with-cljsbuild
                                           data-from-file)
                           data-from-file
                           "dev-resources/test_edn/cljsbuild.edn")))
+  
+
+
+  (generate-suggested-path-data
+                              errr
+                              (::suggested-path errr)
+                              (::unknown-key errr))
+
+  (mapv #(path-match/path-match  %  data-from-file)
+        
+        
+   '[#_({:ky-spec :figwheel.lein-project/figwheel, :ky :figwheel}
+      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+      {:ky :strictly-specking.core/int-key}
+      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
+     ({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild,
+       :ky :cljsbuild}
+      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+      {:ky :strictly-specking.core/pred-key,
+       :ky-pred-desc :strictly-specking.test-schema/string-or-named}
+      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
+     #_({:ky-spec :figwheel.lein-project/figwheel, :ky :figwheel}
+      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+      {:ky :strictly-specking.core/pred-key,
+       :ky-pred-desc :strictly-specking.test-schema/string-or-named}
+      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
+     ({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild,
+       :ky :cljsbuild}
+      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
+      {:ky :strictly-specking.core/int-key}
+      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})]
+
+   )
+
+
+
+  
+  
+
   
   )
 
