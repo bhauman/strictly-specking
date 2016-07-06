@@ -234,6 +234,13 @@
    (path-predicate #(= (name (first %)) (name to)))
    (s/describe from)))
 
+
+;; this only works for the name part
+(defn find-key-path-like-key [from to]
+  (poss-path
+   (path-predicate #(= (name (first %)) (name to)))
+   (s/describe from)))
+
 #_(find-key-path-without-ns :strictly-specking.test-schema/compiler
                           :source-map)
 
