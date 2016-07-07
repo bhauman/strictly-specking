@@ -7,7 +7,7 @@
 ;   You must not remove this notice, or any other, from this software.
 
 (ns strictly-specking.spec
-  (:refer-clojure :exclude [+ * and or cat def keys merge])
+  (:refer-clojure :exclude [+ * and or cat def keys merge ident? indexed? int? bounded-count])
   (:require [clojure.walk :as walk]
             [strictly-specking.spec.gen :as gen]
             [clojure.string :as str]))

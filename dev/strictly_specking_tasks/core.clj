@@ -41,7 +41,7 @@
   (spit
    (io/file "src/strictly_specking/spec.clj")
    (->> '[(ns strictly-specking.spec
-            (:refer-clojure :exclude [+ * and or cat def keys merge]))
+            (:refer-clojure :exclude [+ * and or cat def keys merge ident? indexed? int? bounded-count]))
           (load "/1.6_compat_spec/spec/gen")
           (load "/1.6_compat_spec/spec")]
         (mapv pr-str)
