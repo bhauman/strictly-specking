@@ -1,4 +1,5 @@
 (ns strictly-specking.test-schema
+  (:refer-clojure :exclude [boolean?])
   (:require
    [clojure.spec :as s]
    [strictly-specking.cljs-options-schema]

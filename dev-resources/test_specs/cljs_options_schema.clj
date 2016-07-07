@@ -1,4 +1,5 @@
 (ns strictly-specking.cljs-options-schema
+  (:refer-clojure :exclude [boolean?])
   (:require
    [clojure.spec :as s]
    [clojure.string :as string]
