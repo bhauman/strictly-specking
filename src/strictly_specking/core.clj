@@ -13,10 +13,10 @@
                                              inline-message
                                              pprint-inline-message] :as ep]
    [strictly-specking.fix-paths :as fix-paths]
+   [strictly-specking.fuzzy :refer [similar-key]]
    [strictly-specking.parse-spec :as parse]
    [strictly-specking.path-matching :as path-match]
    [strictly-specking.strict-keys :as strict-impl]))
-
 
 #_(remove-ns 'strictly-specking.core)
 
@@ -643,9 +643,6 @@ of thie error element."
                     (list (::unknown-key err)))
    :error-focus :key})
 
-#_(upgrade-error (test-e (strict-keys :opt-un [::fdas]) {:asdf 3}))
-#_ (error-path (upgrade-error (test-e (strict-keys :opt-un [::fdas]) {:asdf 3})))
-
 (defmethod error-message ::unknown-key [{:keys [path pred val reason via in] :as e}]
   (str "Found unrecognized key " (color (pr-str (::unknown-key e)) :error-key)
        " at path " (color (pr-str (error-path-parent e)) :focus-path) "\n"
@@ -824,6 +821,80 @@ of thie error element."
 (defmethod keys-to-document ::misplaced-key [e]
   (::document-keys e))
 
+;; ** misplaced misspelled key
+;; 
+
+(derive ::misplaced-misspelled-key ::unknown-key)
+
+(eliminate-siblings ::misplaced-misspelled-key ::misplaced-key ::misspelled-key ::wrong-key)
+
+(defn suggested-misspelled-paths [e]
+  (let [res (not-empty (parse/find-key-path-like-key (first (:via e)) (::unknown-key e)))]
+    (mapv #(vector
+            %
+            (similar-key (-> % last :ky)
+                         (::unknown-key e))) res)))
+
+#_(suggested-misspelled-paths {::unknown-key :source-m
+                             :val ["src"]
+                             :via [:strictly-specking.test-schema/lein-project-with-cljsbuild]})
+
+(defn score-suggested-path [e [suggested-key-path score]]
+  (let [{:keys [ky ky-spec]} (last suggested-key-path)
+        key-val (get (:val e) (::unknown-key e))
+        valid (and (parse/spec-from-registry ky-spec)
+                   (s/valid? ky-spec key-val))]
+    [suggested-key-path
+     (cond-> (/ score 10)
+       ;; TODO: I don't think this is neccessary at all
+       (and valid (coll? key-val)) dec
+       valid (- 1/10) ;; a single letter difference for being an atomic value and correct
+       (and (not valid) (map? key-val) (strict-impl/fuzzy-spec? ky-spec))
+       (- (or (strict-impl/fuzzy-conform-score (parse/spec-from-registry ky-spec) key-val)
+              0)))]))
+
+(defn sort-suggestions [e]
+  (let [res (sort-by
+             last
+             (mapv
+              (partial score-suggested-path e)
+              (suggested-misspelled-paths e)))
+        first-score (-> res first last)]
+    (map first
+         (take-while #(= first-score (last %))
+                     res))))
+
+#_(sort-suggestions {::unknown-key :source-m
+                     :val {:source-m true}
+                     :via [:strictly-specking.test-schema/lein-project-with-cljsbuild]})
+
+(defn misplaced-misspelled-key-error? [err]
+  ;; need the root
+  ;; perhaps the first of :via??
+  (when-let [ky (and (first (:via err)) (::unknown-key err))]
+    (when-let [possible-paths (not-empty (set (sort-suggestions err)))]
+      (let [[suggested-path-reified
+             suggested-path] (path-match/best-possible-path possible-paths (::root-data err))]
+        {::suggested-path suggested-path-reified
+         ::correct-key (-> suggested-path last :ky)
+         ::document-keys [(-> suggested-path last :ky-spec)]}))))
+
+(defmethod upgrade-to-error-type? ::misplaced-misspelled-key [_ err]
+  (when-let [merge-data (misplaced-misspelled-key-error? err)]
+    (-> err
+        (merge merge-data)
+        (assoc ::error-type ::misplaced-misspelled-key))))
+
+(defmethod error-message ::misplaced-misspelled-key [e]
+  (str "The key " (color (pr-str (::unknown-key e)) :focus-key)
+       " at " (color (pr-str (error-path-parent e)) :focus-path)
+       " is misspelled and on the wrong path."))
+
+(defmethod inline-message ::misplaced-misspelled-key [e]
+  (str "The key " (pr-str (-> e ::unknown-key)) " has been misspelled and misplaced"))
+
+(defmethod keys-to-document ::misplaced-misspelled-key [e]
+  (::document-keys e))
 
 ;; * error combination
 
@@ -922,7 +993,7 @@ of thie error element."
        vals))
 
 ;; * sorting errors
-;;  sort them by importance
+;;  sort them by graph depth
 
 (defn sort-errors [errors]
   (let [order (vec (reverse (total-order)))]
@@ -956,46 +1027,45 @@ of thie error element."
 
 ;; * error to final display data
 
-
-(defn l [t e]
-  (print t "")
-  (pp/pprint e)
-  e)
-
 (defmulti update-display-data (comp ::error-type :error))
 
 (defmethod update-display-data :default [disp-data] disp-data)
 
-(defn generate-suggested-path-data [err suggested-path final-key]
-  (let [[path vl] (if-let [parent-collection
-                           (get-in (::root-data err)
-                                   (butlast suggested-path))]
-                    (if (map? parent-collection)
-                      [(butlast suggested-path) (assoc parent-collection
-                                                       final-key (:val err))]
-                      [suggested-path (:val err)])
-                    [suggested-path (:val err)])]
-    (path-match/generate-path-structure (::root-data err) path vl)))
-
-(defmethod update-display-data ::misplaced-key [disp-data]
-  (let [err (:error disp-data)]
+;; parameterize the key and messages
+(defn misplaced-update-data [disp-data]
+  (let [err (:error disp-data)
+        ky  (or (::correct-key err) (::unknown-key err))]
     (assoc disp-data
-           :extra-explain (str "The " (::unknown-key err)
-                               " key should probably be placed like so: ")
+           :extra-explain
+           (if (::correct-key err)
+             (str "The key " (pr-str (::unknown-key err))
+                  " probably needs to be changed to " (pr-str ky)
+                  " and placed on a path like: ")
+             (str "The " (pr-str ky)
+                  " key should probably be placed like so: "))
            :extra-diagram (with-out-str
                             (ep/pprint-sparse-path
-                             (generate-suggested-path-data
-                              err
+                             (path-match/generate-path-structure
+                              (::root-data err)
                               (::suggested-path err)
-                              (::unknown-key err))
+                              (get (:val err)
+                                   (::unknown-key err)))
                              ;; very unhappy with this
                              (path-match/generate-path-structure-path
                               (::root-data err)
                               (butlast (::suggested-path err)))
-                             {(::unknown-key err)
-                              (str "The key " (::unknown-key err)
-                                   " should probably be placed like this")}
+                             {ky
+                              (if (::correct-key err)
+                                (str "The correctly spelled key should have a path like this")
+                                (str "The key " ky
+                                     " should probably be placed here"))}
                              {:key-colors [:good]})))))
+
+(defmethod update-display-data ::misplaced-key [disp-data]
+  (misplaced-update-data disp-data))
+
+(defmethod update-display-data ::misplaced-misspelled-key [disp-data]
+    (misplaced-update-data disp-data))
 
 ;; TODO the raw line data may be more appropirate to ship over
 ;; the wire to a client
@@ -1054,6 +1124,21 @@ of thie error element."
      (mapv test-print))))
 
 (comment
+
+  
+  (let [d {:cljsbuild
+           {:builds
+            [{:source-paths ["src"]
+              :compiler
+              {:figwheel
+               {:websocket-host "localhost"
+                :on-jsload      'example.core/fig-reload
+                :on-message     'example.core/on-message
+                :source-map true
+                :debug true}}}]}}]
+    (dev-print
+     (s/explain-data :strictly-specking.test-schema/lein-project-with-cljsbuild d) d nil))
+  
   (def data-from-file (read-string (slurp "dev-resources/test_edn/cljsbuild.edn")))
 
   (dev-print

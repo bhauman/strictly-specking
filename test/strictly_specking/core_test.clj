@@ -31,12 +31,14 @@
   (is (= (ss/children-in-order ::ss/unknown-key)
          '(:strictly-specking.core/misspelled-key
            :strictly-specking.core/wrong-key
-           :strictly-specking.core/misplaced-key)))
+           :strictly-specking.core/misplaced-key
+           :strictly-specking.core/misplaced-misspelled-key)))
 
   (is (= (ss/total-order ::ss/unknown-key)
          '(:strictly-specking.core/misspelled-key
            :strictly-specking.core/wrong-key
-           :strictly-specking.core/misplaced-key)))
+           :strictly-specking.core/misplaced-key
+           :strictly-specking.core/misplaced-misspelled-key)))
  )
 
 (deftest upgrade-error-test
@@ -65,7 +67,7 @@
            '{:in-path (:asdf), :error-focus :value}))
     (is (ep/error-message err)) 
     (is (= (ep/inline-message err)
-           "The value at key :asdf has a non-conforming value")))
+           "The value at key :asdf doesn't conform")))
 
   (let [err (prep-e ::t/figwheel-options {:css-dirs true})]
     (is (= (::ss/error-type err)
@@ -74,7 +76,7 @@
            '{:in-path (:css-dirs), :error-focus :value}))
     (is (ep/error-message err))
     (is (= (ep/inline-message err)
-           "The value at key :css-dirs has a non-conforming value"))
+           "The value at key :css-dirs doesn't conform"))
     (is (= (ss/keys-to-document err)
            [::t/css-dirs]))
     (is
@@ -273,6 +275,36 @@
     (is (= (ep/inline-message e)
            "The key :figwheel has been misplaced")))  
 
+  )
+
+(deftest misplaced-misspelled-key-test
+  (let [v {:cljsbuild
+           {:builds
+            {:dev
+             {:source-paths ["src"]
+              :compiler
+              {:fighweel
+               {:websocket-host "localhost"
+                :on-jsload      'example.core/fig-reload
+                :on-message     'example.core/on-message
+                :source-map true
+                :debug true}}}}}}
+        e (prep-e :strictly-specking.test-schema/lein-project-with-cljsbuild v)]
+    (is (= (::ss/error-type e)
+           ::ss/misplaced-misspelled-key))
+    (is (= (::ss/unknown-key e)
+           :fighweel))
+    (is (= (::ss/suggested-path e)
+           '(:cljsbuild :builds :dev :figwheel)))
+    (is (= (::ss/error-path e)
+           '{:in-path (:cljsbuild :builds :dev :compiler :fighweel), :error-focus :key}))
+    (is (= (::ss/document-keys e)
+           [::t/figwheel]))
+    (is (= (ss/keys-to-document e)
+           [::t/figwheel]))
+    (is (ep/error-message e))
+    (is (= (ep/inline-message e)
+           "The key :fighweel has been misspelled and misplaced")))
   )
 
 
