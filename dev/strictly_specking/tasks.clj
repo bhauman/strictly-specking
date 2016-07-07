@@ -28,10 +28,20 @@
        (filter #(.exists %))
        (mapv fix-spec-require-in-file)))
 
+(defn output-spec-shim []
+  (spit
+   (io/file "src/strictly_specking/spec.clj")
+   (->> '[(ns strictly-specking.spec
+            (:refer-clojure :exclude [+ * and or cat def keys merge]))
+          (load "/1.6_compat_spec/spec/gen")
+          (load "/1.6_compat_spec/spec")]
+        (mapv pr-str)
+        (string/join "\n")
+        add-newline)))
+
 (defn standalone []
   (fix-spec-requires)
-  
-  )
+  (output-spec-shim))
 
 (comment
   (fix-spec-requires)
@@ -47,11 +57,7 @@
                   (str "$1[strictly-specing.spec :as s]$2")
  ))
 
-
-
-
-
 (defn -main [command & args]
   (condp = command
-    ":standalone" (fix-spec-requires)))
+    ":standalone" (standalone)))
 

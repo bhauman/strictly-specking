@@ -9,6 +9,10 @@
                  [myguidingstar/clansi "1.3.0"
                   :exclusions [org.clojure/clojure]]]
 
+  :profiles {:dev {:source-paths ["dev" "src"]
+                   :aliases
+                   {"standalone" ["run" "-m" "strickly-specking.tasks" ":standalone"]}}}
+  
   ;; just to test project parsing
   :cljsbuild {:assert true
               :builds [{ :id "example-admin"
