@@ -6,7 +6,6 @@
    [strictly-specking.fuzzy :refer [similar-key]]
    [strictly-specking.parse-spec :as parse :refer [parse-keys-args spec-from-registry]]))
 
-
 (def
   ^{:dynamic true
     :doc
@@ -310,10 +309,10 @@
 
 (defmethod conform-at-level :default [_ x strict keys-spec known-keys]
   (let [result (s/conform* keys-spec x)]
-    (if (and (not= :clojure.spec/invalid result)
+    (if (and (not= ::s/invalid result)
              (s/valid? strict x))
       result
-      :clojure.spec/invalid)))
+      ::s/invalid)))
 
 (defmethod conform-at-level :warn [_ x strict keys-spec known-keys]
   (let [result (s/conform* keys-spec x)]
@@ -325,7 +324,7 @@
                  (pr-str (vec unknown-keys))
                  "found in map"
                  (pr-str x))
-        (println "The only known keys are" (pr-str known-keys))))
+        (println "The only expected keys are" (pr-str known-keys))))
     result))
 
 (defmethod conform-at-level :ignore [_ x strict keys-spec known-keys]
@@ -335,7 +334,8 @@
 
 (defn strict-mapkeys-impl [{:keys [known-keys k->s keys->specs] :as spec-key-data} keys-spec]
   {:pre [(set? known-keys)]}
-  (let [strict (s/spec-impl known-keys #(every? known-keys (keys %))
+  (let [strict (s/spec-impl (list 'every? known-keys '(keys %))
+                            #(every? known-keys (keys %))
                             nil nil)]
     (reify
       clojure.lang.IFn
@@ -343,7 +343,7 @@
       FuzzySpec
       (fuzzy-conform-score [_ x]
         (fuzzy-conform-score-helper spec-key-data x))
-      clojure.spec/Spec
+      s/Spec
       (conform* [self x]
         (conform-at-level self x strict keys-spec known-keys))
       (unform* [_ x] (s/unform* keys-spec x))

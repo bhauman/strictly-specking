@@ -44,10 +44,10 @@
 
 (deftest upgrade-error-test
   (is (= (ss/upgrade-error {})
-         #::ss{:error-type :strictly-specking.core/bad-value}))
+         {::ss/error-type :strictly-specking.core/bad-value}))
 
   (is (= (ss/upgrade-error {::ss/error-type ::whatever})
-         #::ss{:error-type :strictly-specking.core-test/whatever}))
+         {::ss/error-type :strictly-specking.core-test/whatever}))
   )
 
 
@@ -123,7 +123,7 @@
 
 (deftest wrong-size-collection-test
   (is (= (ss/wrong-size-pred? '(clojure.core/<= 2 (clojure.core/count %) Integer/MAX_VALUE))
-         #::ss{:min-count 2, :max-count 'Integer/MAX_VALUE}))
+         {::ss/min-count 2, ::ss/max-count 'Integer/MAX_VALUE}))
   (is (nil?
        (ss/wrong-size-pred? '(clojure.core/<= 2 rr (clojure.core/count %) Integer/MAX_VALUE))))
   (let [e (prep-e (s/every integer? :min-count 2) [])]
@@ -137,7 +137,7 @@
 
 (deftest wrong-count-collection-test
   (is (= (ss/wrong-count-pred? '(clojure.core/= 2 (clojure.core/count %)))
-         #:strictly-specking.core{:target-count 2}))
+         {::ss/target-count 2}))
   (is (nil? (ss/wrong-count-pred? '(clojure.core/= 2 5 (clojure.core/count %)))))
   
   (let [e (prep-e (s/map-of keyword? (s/every integer? :count 2))

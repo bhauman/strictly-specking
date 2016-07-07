@@ -12,6 +12,12 @@
 
 #_ (remove-ns 'strictly-specking.cljs-options-schema)
 
+;; !!! ADDING for 1.8 compat
+(defn boolean?
+  "Return true if x is a Boolean"
+  {:added "1.9"}
+  [x] (instance? Boolean x))
+
 ;; for development
 (reset-duplicate-keys)
 

@@ -1,5 +1,4 @@
-(ns strictly-specking.fix-paths
-  (:require [clojure.spec :as s]))
+(ns strictly-specking.fix-paths)
 
 (declare fix-path)
 

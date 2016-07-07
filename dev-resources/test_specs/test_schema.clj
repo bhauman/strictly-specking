@@ -12,6 +12,13 @@
 ;; for development - not a crime if it happens in production
 (ssp/reset-duplicate-keys)
 
+;; !!! ADDING for 1.8 compat
+(defn boolean?
+  "Return true if x is a Boolean"
+  {:added "1.9"}
+  [x] (instance? Boolean x))
+
+
 (def-key ::string-or-symbol (some-fn non-blank-string? symbol?))
 
 (def-key ::string-or-named  (some-fn non-blank-string? keyword? symbol?))

@@ -1147,7 +1147,7 @@ of thie error element."
   (reify
     clojure.lang.IFn
     (invoke [this x] (parent-spec x))
-    clojure.spec/Spec
+    s/Spec
     (conform* [_ x] (s/conform* parent-spec x))
     (unform* [_ x] (s/unform* parent-spec x))
     (explain* [_ path via in x]
@@ -1184,7 +1184,7 @@ of thie error element."
   (reify
     clojure.lang.IFn
     (invoke [this x] (parent-spec x))
-    clojure.spec/Spec
+    s/Spec
     (conform* [_ x]
       (if (s/valid? parent-spec x)
         (s/conform* parent-spec x)
