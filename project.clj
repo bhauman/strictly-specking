@@ -12,8 +12,8 @@
 
   :profiles {:dev {:source-paths ["dev" "src"]
                    :aliases
-                   {"standalone" ["run" "-m" "strictly-specking-tasks.core" ":standalone"]}
-                   {"with-spec" ["run" "-m" "strictly-specking-tasks.core" ":with-clojure-spec"]}}}
+                   {"standalone" ["run" "-m" "strictly-specking-tasks.core" ":standalone"]
+                    "with-spec" ["run" "-m" "strictly-specking-tasks.core" ":with-clojure-spec"]}}}
   
   ;; just to test project parsing
   :cljsbuild {:assert true
