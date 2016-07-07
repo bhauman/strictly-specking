@@ -1,4 +1,4 @@
-(ns strictly-specking.tasks
+(ns strictly-specking-tasks.core
   (:require [clojure.java.io :as io]
             [clojure.string :as string]
             [clojure.java.shell :as shell]))
@@ -24,6 +24,7 @@
 (defn fix-spec-requires []
   (->> (file-seq (io/file "src/strictly_specking"))
        (concat (file-seq (io/file "test")))
+       (concat (file-seq (io/file "dev-resources/test_specs")))
        (filter #(.endsWith (str %) ".clj"))
        (filter #(.exists %))
        (mapv fix-spec-require-in-file)))
