@@ -2,8 +2,7 @@
   (:require [clojure.test :refer :all]
             [clojure.string :as string]
             [strictly-specking.path-matching :refer :all]
-            [strictly-specking.parse-spec :as parse]
-            #_[clojure.spec :as s]))
+            [strictly-specking.parse-spec :as parse]))
 
 #_(remove-ns 'strictly-specking.path-matching-test)
 
