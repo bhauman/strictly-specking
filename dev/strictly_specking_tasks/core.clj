@@ -49,19 +49,16 @@
         add-newline)))
 
 (defn standalone []
-  (fix-spec-requires (partial fix-spec-require-in-file standalone))
+  (fix-spec-requires (partial fix-spec-require-in-file standalone-spec-require))
   (output-spec-shim))
 
 (defn with-clojure-spec []
   (fix-spec-requires (partial fix-spec-require-in-file fix-spec-require))
-  (.delete (io/file "src/strictly_specking/spec.clj"))
-  )
-
-
+  (.delete (io/file "src/strictly_specking/spec.clj")))
 
 (comment
   (with-clojure-spec)
-  (fix-spec-requires)
+  (standalone)
   (fix-spec-require-in-file (io/file "src/strictly_specking/core.clj"))
   (fix-spec-require "   [clojure.spec :as s]")
 
@@ -76,5 +73,7 @@
 
 (defn -main [command & args]
   (condp = command
-    ":standalone" (standalone)))
+    ":standalone" (standalone)
+    ":with-clojure-spec" (with-clojure-spec))
+  )
 
