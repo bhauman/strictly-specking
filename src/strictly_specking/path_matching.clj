@@ -5,13 +5,13 @@
    [clojure.pprint :as pp]
    [strictly-specking.strict-keys :as strict-impl]))
 
-
+#_(remove-ns 'strictly-specking.path-matching)
 
 ;; 1. the key is recognized among the global keys and the value fuzzy conforms
 
 ;; or the key is recognized as a misspelled global key and the value fuzzy conforms
 
-;; 2. we find a likely path to the recognized key 
+;; 2. we find a likely path to the recognized key
 
 ;; does this path already exist?
 ;; TODO does the :val fuzzy-conform?
@@ -24,24 +24,25 @@ focused key currently has.
 Basically checks to see if the proposed path ends with a key spec that
 fails against the current value (or doesn't even fuzzy conform.
 "
-  [e possible-paths]
+  [key-val possible-paths]
   ;; first is the value valid for this key-spec?
-  (if-let [paths (not-empty (filter (fn [x]
-                                      (s/valid? (-> x last :ky-spec)
-                                                (get (:val e)
-                                                     (:strictly-specking.core/unknown-key e))))
-                                    possible-paths))]
+  (if-let [paths
+           (not-empty
+            (filter (fn [x]
+                      (s/valid? (-> x last :ky-spec)
+                                key-val))
+                    possible-paths))]
     paths
     ;; if not is this a map and does it fuzzy conform
-    (if-let [score-paths (not-empty (keep (fn [x]
-                                            (let [vl (get (:val e)
-                                                          (:strictly-specking.core/unknown-key e))]
-                                              (when (map? vl)
-                                                [(strict-impl/fuzzy-conform-score-spec-key
-                                                  (-> x last :ky-spec)
-                                                  vl)
-                                                 x])))
-                                          possible-paths))]
+    (if-let [score-paths
+             (not-empty
+              (keep (fn [x]
+                      (when (map? key-val)
+                        [(strict-impl/fuzzy-conform-score-spec-key
+                          (-> x last :ky-spec)
+                          key-val)
+                         x]))
+                    possible-paths))]
       (->> score-paths
            (filter #(> (first %) 0.5))
            (sort-by (comp - first))
@@ -53,38 +54,69 @@ fails against the current value (or doesn't even fuzzy conform.
 ;; when there is more than one path let's look at the existing
 ;; structure to see if we can match it
 
+(defn decorate-type [data possible-path-elem]
+  (if (coll? data)
+    (assoc possible-path-elem
+           :into
+           (cond
+             (map? data)        {}
+             (vector? data)     []
+             (set? data)        #{}
+             (sequential? data) '())
+           ;; should just add actual data
+           ;; :data data
+           )
+    possible-path-elem))
+
 (declare path-match)
 
-(defn path-match-helper [possible-path kv-list]
+(defn path-match-helper [data possible-path kv-list]
   (->> kv-list
       (mapcat
-       #(map (partial cons (first %))
+       #(map (partial cons (assoc (decorate-type data (first possible-path))
+                                  :matched (first %)))
              (path-match (rest possible-path) (second %))))
       distinct))
 
 (defn path-match [possible-path data]
   (let [p (first possible-path)
-        match-next (partial path-match-helper possible-path)]
+        match-next (partial path-match-helper data possible-path)]
     (if (or (nil? data) (nil? p))
       [[]]
       (or
        (condp = (:ky p)
          :strictly-specking.core/int-key
          (when (sequential? data)
-           (match-next (map-indexed vector data)))
+           (concat [[(decorate-type data p)]]
+                   (match-next (map-indexed vector data))))
          :strictly-specking.core/pred-key
          (when (and (map? data)
                     (not= (:ky-pred-desc p) ::s/any))
-           (match-next data))
+           (concat [[(decorate-type data p)]]
+                   (match-next data)))
          (and (map? data) (contains? data (:ky p))
               (match-next (select-keys data [(:ky p)]))))
        [[]]))))
 
+;; really need to test the above in different situations
+
+(def wildcard-key?
+  #{:strictly-specking.core/int-key
+    :strictly-specking.core/pred-key})
+
+(defn score-path [p possible-path]
+  (let [wilds (* 1/4 (count (filter (comp wildcard-key? (some-fn :matched :ky))
+                                    p)))]
+    (/ (- (count p) wilds)
+       (count possible-path))))
+
 (defn rank-path-matches [possible-path data]
   (->> (path-match possible-path data)
-       (filter #(not= (last %)
+       (filter #(not= (-> % last :ky)
                       (-> possible-path last :ky)))
-       (map (fn [p] [(/ (count p) (count possible-path)) p possible-path]))
+       (map (fn [p] [(score-path p possible-path)
+                     p
+                     possible-path]))
        (sort-by (comp - first))))
 
 (defn path-matches [possible-paths data]
@@ -93,214 +125,46 @@ fails against the current value (or doesn't even fuzzy conform.
         #(rank-path-matches % data))))
 
 (defn fill-out-path [partial-path possible-path]
-  [(concat partial-path
-          (map
-           :ky
-           (drop (count partial-path) possible-path)))
-   possible-path])
+  (concat
+   partial-path
+   (drop (count partial-path) possible-path)))
 
 (defn best-possible-path [possible-paths data]
-  (->> (path-matches possible-paths data)
-       (sort-by (comp - first))
-       first
-       rest
-       (apply fill-out-path)))
+  (when-let [[part poss]
+             (->> (path-matches possible-paths data)
+                  (sort-by (comp - first))
+                  first
+                  rest
+                  not-empty)]
+    (fill-out-path part poss)))
 
+(defn gen-into-data [p]
+  (or (:into p)
+      (condp = (:ky p)
+        :strictly-specking.core/pred-key {}
+        :strictly-specking.core/int-key []
+        {})))
 
-;; TODO we can also sample from the original structure
-(defn generate-path-structure
-  "Generates a data structure to demonstrate where to place a key"
-  [data path v]
-  (let [p (first path)]
-    (cond
-      (or (empty? path) (nil? path)) v
-      (nil? data)
-      (let [nxt (generate-path-structure nil (rest path) v)]
-        (if (or (integer? p) (= :strictly-specking.core/int-key p))
-          [nxt]
-          (hash-map ((some-fn {:strictly-specking.core/pred-key :__any_keyword} identity) p) nxt)))
-      :else
-      (when-let [f (cond
-                     ;; This is where you would do sampling
-                     (map? data)       #(hash-map p %)
-                     (vector? data)     vector
-                     (set? data)        (comp set vector)
-                     (sequential? data) list)]
-        (f (generate-path-structure (get data p) (rest path) v))))))
+(defn gen-key [p]
+  (condp = (:ky p)
+    :strictly-specking.core/pred-key
+    (or (:matched p)
+        [:key-like (s/describe (:ky-pred-desc p))])
+    (:ky p)))
 
-(defn generate-path-structure-path
-  "Generates a data structure to demonstrate where to place a key"
-  [data path]
-  (let [p (first path)]
-    (cond
-      (or (empty? path) (nil? path)) '()
-      (nil? data)
-      (let [nxt (generate-path-structure-path nil (rest path))]
-        (if (or (integer? p) (= :strictly-specking.core/int-key p))
-          (cons 0 nxt)
-          (cons p nxt)))
-      :else
-      (when-let [f (cond
-                     ;; This is where you would do sampling
-                     (map? data)        (partial cons p)
-                     (vector? data)     (partial cons 0)
-                     (set? data)        (partial cons 0)
-                     (sequential? data) (partial cons 0))]
-        (f (generate-path-structure-path (get data p) (rest path)))))))
+(defn generate-demo-data [suggested-path target-val]
+  (reduce
+   (fn [d p]
+     (let [ind (gen-into-data p)]
+       (if (map? ind)
+         (into ind [[(gen-key p) d]])
+         (into ind [d]))))
+   target-val
+   (reverse suggested-path)))
 
-#_(generate-path-structure-path  {:a {:b [{:c {}}]}} [:a :b 1 :c ::int-key ::pred-key])
-
-#_(best-possible-path
-   ['({:ky-spec :strictly-specking.test-schema/cljsbuilds, :ky :cljsbuild}
-      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
-      {:ky :strictly-specking.core/pred-key,
-       :ky-pred-desc :strictly-specking.test-schema/string-or-named}
-      {:ky-spec :strictly-specking.test-schema/figwheel, :ky :figwheel})
-    
-    '({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild, :ky :cljsbuild}
-      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
-      {:ky :strictly-specking.core/int-key}
-      {:ky-spec :strictly-specking.test-schema/figwheel, :ky :figwheel})]
-   '{:cljsbuild
-     {:builds
-      {:dev
-       1
-       :cow 1}}}
- )
-
-
-(comment
-  
-  (def test-error
-    '{:path
-      [:cljsbuild
-       :builds
-       :builds-map
-       1
-       :figwheel
-       :figwheel-client-options
-       :unknown-key
-       :source-map],
-      :pred
-      #{:on-message :on-compile-warning :on-jsload :websocket-host :reload-dependents
-        :on-compile-fail :debug :heads-up-display :build-id :websocket-url :before-jsload
-        :load-warninged-code :eval-fn :devcards :retry-count :autoload :open-urls :on-cssload},
-      :val
-      {:websocket-host "localhost",
-       :on-jsload example.core/fig-reload,
-       :on-message example.core/on-message,
-       :open-urls
-       ["http://localhost:3449/index.html"
-        "http://localhost:3449/index.html"
-        "http://localhost:3449/index.html"
-        "http://localhost:3449/index.html"
-        "http://localhost:3449/index.html"],
-       :source-map true,
-       :debug true},
-      :via
-      [:strictly-specking.test-schema/lein-project-with-cljsbuild
-       :cljsbuild.lein-project.require-builds/cljsbuild
-       :cljsbuild.lein-project/cljsbuild
-       :strictly-specking.test-schema/builds
-       :strictly-specking.test-schema/build-config
-       :strictly-specking.test-schema/figwheel],
-      :in [:cljsbuild :builds :dev :figwheel],
-      :strictly-specking.core/unknown-key :source-map,
-      :strictly-specking.core/error-type :strictly-specking.core/unknown-key,
-      :strictly-specking.core/root-data
-      {:cljsbuild
-       {:builds
-        {:dev
-         {:id "example-admin",
-          :source-paths ["src" "dev" "tests" "../support/src"],
-          :assert true,
-          :figwheel
-          {:websocket-host "localhost",
-           :on-jsload example.core/fig-reload,
-           :on-message example.core/on-message,
-           :open-urls
-           ["http://localhost:3449/index.html"
-            "http://localhost:3449/index.html"
-            "http://localhost:3449/index.html"
-            "http://localhost:3449/index.html"
-            "http://localhost:3449/index.html"],
-           :source-map true,
-           :debug true},
-          :compiler
-          {:main example.core,
-           :asset-path "js/out",
-           :output-to "resources/public/js/example.js",
-           :output-dir "resources/public/js/out",
-           :libs ["libs_src" "libs_sscr/tweaky.js"],
-           :foreign-libs [{:file "foreign/wowza.js", :provides ["wowzacore"]}],
-           :optimizations :whitespace}}}}}})
-
-  (def test-error2
-    '{:path [:cljsbuild :builds :builds-map 1 :compiler :unknown-key :figwheel],
-      :pred
-      #{:output-dir :closure-defines :static-fns :dump-core :externs :ups-libs :optimize-constants
-        :cache-analysis :modules :elide-asserts :language-out :optimizations :recompile-dependents
-        :source-map-path :closure-extra-annotations :ups-foreign-libs :parallel-build :verbose
-        :preloads :source-map-inline :anon-fn-naming-policy :output-to :source-map-timestamp
-        :preamble :asset-path :print-input-delimiter :output-wrapper :ups-externs :hashbang
-        :source-map :watch-fn :foreign-libs :libs :target :pseudo-names :devcards :external-config
-        :compiler-stats :main :pretty-print :closure-output-charset :language-in :warning-handlers
-        :emit-constants},
-      :val
-      {:main example.core,
-       :asset-path "js/out",
-       :output-to "resources/public/js/example.js",
-       :output-dir "resources/public/js/out",
-       :libs ["libs_src" "libs_sscr/tweaky.js"],
-       :foreign-libs [{:file "foreign/wowza.js", :provides ["wowzacore"]}],
-       :optimizations :whitespace,
-       :figwheel
-       {:websocket-host 1 #_"localhost",
-        :on-jsload example.core/fig-reload,
-        :on-message example.core/on-message,
-        :open-urls
-        ["http://localhost:3449/index.html"
-         "http://localhost:3449/index.html"
-         "http://localhost:3449/index.html"
-         "http://localhost:3449/index.html"
-         "http://localhost:3449/index.html"],
-        :source-map true,
-        :debug true}},
-      :via
-      [:strictly-specking.test-schema/lein-project-with-cljsbuild
-       :cljsbuild.lein-project.require-builds/cljsbuild
-       :cljsbuild.lein-project/cljsbuild
-       :strictly-specking.test-schema/builds
-       :strictly-specking.test-schema/build-config
-       :strictly-specking.test-schema/compiler],
-      :in [:cljsbuild :builds :dev :compiler],
-      :strictly-specking.core/unknown-key :figwheel,
-      :strictly-specking.core/error-type :strictly-specking.core/unknown-key,
-      :strictly-specking.core/root-data
-      {:cljsbuild
-       {:builds
-        {:dev
-         {:id "example-admin",
-          :source-paths ["src" "dev" "tests" "../support/src"],
-          :assert true,
-          :compiler
-          {:main example.core,
-           :asset-path "js/out",
-           :output-to "resources/public/js/example.js",
-           :output-dir "resources/public/js/out",
-           :libs ["libs_src" "libs_sscr/tweaky.js"],
-           :foreign-libs [{:file "foreign/wowza.js", :provides ["wowzacore"]}],
-           :optimizations :whitespace,
-           :figwheel
-           {:websocket-host "localhost",
-            :on-jsload example.core/fig-reload,
-            :on-message example.core/on-message,
-            :open-urls
-            ["http://localhost:3449/index.html"
-             "http://localhost:3449/index.html"
-             "http://localhost:3449/index.html"
-             "http://localhost:3449/index.html"
-             "http://localhost:3449/index.html"],
-            :source-map true,
-            :debug true}}}}}}})
-  )
+(defn generate-demo-path [suggested-path]
+  (map
+   #(if (= :strictly-specking.core/int-key (:ky %))
+      0
+      (gen-key %))
+   suggested-path))

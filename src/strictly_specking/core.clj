@@ -30,7 +30,7 @@
 ;; Creating a def-key contruct to allow for simultaneous defining of
 ;; specs and docs, this will also check for duplicate keys
 
-;; ** meta data on keyswords
+;; ** meta data on keywords
 
 ;; our own private registry for meta data on namespaced keys
 ;; we will be adding docs to keys this way along with other
@@ -797,11 +797,10 @@ of thie error element."
                (not-empty
                 (set
                  (path-match/filter-possbile-path-choices
-                  err
+                  (get (:val err) (::unknown-key err))
                   (parse/find-key-path-without-ns (first (:via err)) ky))))]
-      (let [[suggested-path-reified
-             suggested-path] (path-match/best-possible-path possible-paths (::root-data err))]
-        {::suggested-path suggested-path-reified
+      (let [suggested-path (path-match/best-possible-path possible-paths (::root-data err))]
+        {::suggested-path suggested-path
          ::document-keys [(-> suggested-path last :ky-spec)]}))))
 
 (defmethod upgrade-to-error-type? ::misplaced-key [_ err]
@@ -873,9 +872,9 @@ of thie error element."
   ;; perhaps the first of :via??
   (when-let [ky (and (first (:via err)) (::unknown-key err))]
     (when-let [possible-paths (not-empty (set (sort-suggestions err)))]
-      (let [[suggested-path-reified
-             suggested-path] (path-match/best-possible-path possible-paths (::root-data err))]
-        {::suggested-path suggested-path-reified
+      (let [suggested-path
+            (path-match/best-possible-path possible-paths (::root-data err))]
+        {::suggested-path suggested-path
          ::correct-key (-> suggested-path last :ky)
          ::document-keys [(-> suggested-path last :ky-spec)]}))))
 
@@ -1045,14 +1044,11 @@ of thie error element."
                   " key should probably be placed like so: "))
            :extra-diagram (with-out-str
                             (ep/pprint-sparse-path
-                             (path-match/generate-path-structure
-                              (::root-data err)
+                             (path-match/generate-demo-data
                               (::suggested-path err)
                               (get (:val err)
                                    (::unknown-key err)))
-                             ;; very unhappy with this
-                             (path-match/generate-path-structure-path
-                              (::root-data err)
+                             (path-match/generate-demo-path
                               (butlast (::suggested-path err)))
                              {ky
                               (if (::correct-key err)
@@ -1123,76 +1119,6 @@ of thie error element."
      #_(take 1)
      (mapv test-print))))
 
-(comment
-
-  
-  (let [d {:cljsbuild
-           {:builds
-            [{:source-paths ["src"]
-              :compiler
-              {:figwheel
-               {:websocket-host "localhost"
-                :on-jsload      'example.core/fig-reload
-                :on-message     'example.core/on-message
-                :source-map true
-                :debug true}}}]}}]
-    (dev-print
-     (s/explain-data :strictly-specking.test-schema/lein-project-with-cljsbuild d) d nil))
-  
-  (def data-from-file (read-string (slurp "dev-resources/test_edn/cljsbuild.edn")))
-
-  (dev-print
-   (s/explain-data :strictly-specking.test-schema/lein-project-with-cljsbuild
-                   data-from-file)
-   data-from-file
-   "dev-resources/test_edn/cljsbuild.edn")
-
-  (def errr (first (prepare-errors (s/explain-data :strictly-specking.test-schema/lein-project-with-cljsbuild
-                                          data-from-file)
-                          data-from-file
-                          "dev-resources/test_edn/cljsbuild.edn")))
-  
-
-
-  (generate-suggested-path-data
-                              errr
-                              (::suggested-path errr)
-                              (::unknown-key errr))
-
-  (mapv #(path-match/path-match  %  data-from-file)
-        
-        
-   '[#_({:ky-spec :figwheel.lein-project/figwheel, :ky :figwheel}
-      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
-      {:ky :strictly-specking.core/int-key}
-      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
-     ({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild,
-       :ky :cljsbuild}
-      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
-      {:ky :strictly-specking.core/pred-key,
-       :ky-pred-desc :strictly-specking.test-schema/string-or-named}
-      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
-     #_({:ky-spec :figwheel.lein-project/figwheel, :ky :figwheel}
-      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
-      {:ky :strictly-specking.core/pred-key,
-       :ky-pred-desc :strictly-specking.test-schema/string-or-named}
-      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})
-     ({:ky-spec :cljsbuild.lein-project.require-builds/cljsbuild,
-       :ky :cljsbuild}
-      {:ky-spec :strictly-specking.test-schema/builds, :ky :builds}
-      {:ky :strictly-specking.core/int-key}
-      {:ky-spec :strictly-specking.test-schema/compiler, :ky :compiler})]
-
-   )
-
-
-
-  
-  
-
-  
-  )
-
 ;; * additional specs
 
 ;; ** Strict-keys Spec
@@ -1209,7 +1135,6 @@ of thie error element."
   (let [form (macroexpand `(s/keys ~@args))]
     `(strictly-specking.strict-keys/strict-mapkeys-impl
       (strictly-specking.parse-spec/parse-keys-args ~@args) ~form)))
-
 
 ;; ** Attach Reason Spec
 

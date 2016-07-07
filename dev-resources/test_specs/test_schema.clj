@@ -5,21 +5,18 @@
    [strictly-specking.core :refer [strict-keys
                                    def-key
                                    non-blank-string?]
-    :as ss]))
+    :as ssp]))
 
 #_ (remove-ns 'strictly-specking.test-schema)
 
 ;; for development - not a crime if it happens in production
-(ss/reset-duplicate-keys)
+(ssp/reset-duplicate-keys)
 
 (def-key ::string-or-symbol (some-fn non-blank-string? symbol?))
 
 (def-key ::string-or-named  (some-fn non-blank-string? keyword? symbol?))
 
-
 #_(s/conform ::string-or-named :asdfasdf)
-
-
 
 #_(s/explain (s/every string? :min-count 1 :into [] :kind vector?)
            {:asdf 1})
@@ -651,7 +648,7 @@ Example figwheel.edn file
    :opt-un [::figwheel-options
             ::build-ids]))
 
-(do
+(comment
   (def test-data
     { :cljsbuild {
                   :builds {:dev {:id "example-admin"
@@ -763,17 +760,17 @@ Example figwheel.edn file
                                             ;; :recompile-dependents true
                                             :optimizations :none}}]}})
 
-  (ss/dev-print (s/explain-data ::lein-project-with-cljsbuild
+  (ssp/dev-print (s/explain-data ::lein-project-with-cljsbuild
                                 test-data)
                 test-data
                 nil)
 
-#_(ss/prepare-errors (s/explain-data (ss/non-empty-map-of keyword? (ss/map-of keyword? integer?))
+#_(ssp/prepare-errors (s/explain-data (ssp/non-empty-map-of keyword? (s/map-of keyword? integer?))
                                    {})
                    {}
                    nil)
   
-  (first (ss/prepare-errors (s/explain-data ::lein-project-with-cljsbuild
+  (first (ssp/prepare-errors (s/explain-data ::lein-project-with-cljsbuild
                                             test-data)
                             test-data
                             nil))

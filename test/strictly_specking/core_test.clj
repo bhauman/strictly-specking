@@ -2,7 +2,8 @@
   (:require [clojure.test :refer :all]
             [clojure.string :as string]
             [clansi.core :refer [without-ansi]]
-            [strictly-specking.core :refer :all :as ss]
+            [strictly-specking.path-matching :as path-match]
+            [strictly-specking.core :as ss]
             [strictly-specking.error-printing :as ep]
             [strictly-specking.parse-spec :as parse]
             [clojure.spec :as s]))
@@ -82,7 +83,7 @@
     (is
      (.contains (with-out-str (without-ansi (ep/pprint-inline-message err)))
                 ":css-dirs"))
-    (is (= (keys-to-document err)
+    (is (= (ss/keys-to-document err)
            [::t/css-dirs])) 
     
     ))
@@ -263,7 +264,7 @@
            ::ss/misplaced-key))
     (is (= (::ss/unknown-key e)
            :figwheel))
-    (is (= (::ss/suggested-path e)
+    (is (= (path-match/generate-demo-path (::ss/suggested-path e))
            '(:cljsbuild :builds :dev :figwheel)))
     (is (= (::ss/error-path e)
            '{:in-path (:cljsbuild :builds :dev :compiler :figwheel), :error-focus :key}))
@@ -294,7 +295,7 @@
            ::ss/misplaced-misspelled-key))
     (is (= (::ss/unknown-key e)
            :fighweel))
-    (is (= (::ss/suggested-path e)
+    (is (= (path-match/generate-demo-path (::ss/suggested-path e))
            '(:cljsbuild :builds :dev :figwheel)))
     (is (= (::ss/error-path e)
            '{:in-path (:cljsbuild :builds :dev :compiler :fighweel), :error-focus :key}))
@@ -304,9 +305,7 @@
            [::t/figwheel]))
     (is (ep/error-message e))
     (is (= (ep/inline-message e)
-           "The key :fighweel has been misspelled and misplaced")))
-  )
-
+           "The key :fighweel has been misspelled and misplaced"))))
 
 (deftest find-keypath-without-ns-test
   (is (= (parse/find-key-path-without-ns :cljsbuild.lein-project.require-builds/cljsbuild
@@ -339,7 +338,7 @@
            :opt-un
            [::a ::b])))
 
-  (is (= (s/describe (strict-keys :opt-un [::a ::b]
+  (is (= (s/describe (ss/strict-keys :opt-un [::a ::b]
                                   :opt [::c ::d]))
          '(strict-keys
            :opt
@@ -442,74 +441,67 @@
   
 )
 
+(deftest warning-levels
+  (is (not (s/valid? (ss/strict-keys :opt-un [:asdf/asdf]) {:aqwer 1})))
 
+  (is (string/blank?
+       (with-out-str (s/valid? (ss/strict-keys :opt-un [:asdf/asdf]) {:aqwer 1}))))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-(comment
-  (s/def ::id (s/or :string string? :keyword keyword?))
-(s/def ::source-paths (s/+ string?))
-(s/def ::assert #(or (true? %) (false? %)))
-(s/def ::build-config (strict-keys :req-un [
-                                            ::id
-                                            ::source-paths]
-                                   :opt-un [::assert]))
+  (is (= 2
+         (-> (s/explain-data (ss/strict-keys :opt-un [::c/output-to])
+                             {:output-to 5
+                              :aqwer 1})
+             ::s/problems
+             count)))
+  
+  (binding [strictly-specking.strict-keys/*unknown-key-level* :fail]
     
-(s/def ::http-server-root string?)
-(s/def ::server-port      integer?)
-(s/def ::server-ip        string?)
-(s/def ::builds           (s/* ::build-config))
+    (is (not (s/valid? (ss/strict-keys :opt-un [:asdf/asdf]) {:aqwer 1})))
+
+    (is (string/blank?
+         (with-out-str (s/valid? (ss/strict-keys :opt-un [:asdf/asdf]) {:aqwer 1}))))
+
+    (is (= 2
+         (-> (s/explain-data (ss/strict-keys :opt-un [::c/output-to])
+                             {:output-to 5
+                              :aqwer 1})
+             ::s/problems
+             count)))
+    )
+  
+  (binding [strictly-specking.strict-keys/*unknown-key-level* :warn]
+
+    (is (s/valid? (ss/strict-keys :opt-un [:asdf/asdf])
+                  {:aqwer 1}))
+    (is (not
+         (string/blank?
+          (with-out-str (s/valid? (ss/strict-keys :opt-un [:asdf/asdf]) {:aqwer 1})))))
+
+    (is (= 1
+         (-> (s/explain-data (ss/strict-keys :opt-un [::c/output-to])
+                             {:output-to 5
+                              :aqwer 1})
+             ::s/problems
+             count)))
+    )
+
+  (binding [strictly-specking.strict-keys/*unknown-key-level* :ignore]
+    (is (s/valid? (ss/strict-keys :opt-un [:asdf/asdf])
+                  {:aqwer 1}))
+    (is (string/blank?
+         (with-out-str (s/valid? (ss/strict-keys :opt-un [:asdf/asdf]) {:aqwer 1}))))
     
-(s/def ::figwheel (strict-keys
-                   :opt-un [::http-server-root
-                            ::server-port
-                            ::server-ip]
-                   :req-un [::builds]))
+    (is (= 1
+           (-> (s/explain-data (ss/strict-keys :opt-un [::c/output-to])
+                               {:output-to 5
+                                :aqwer 1})
+               ::s/problems
+               count)))
 
-(s/def ::dimensions (s/tuple integer? integer?))
+    )
+  
+  )
 
-(s/def ::bedroom
-  (strict-keys :opt-un [::door
-                        ::dimensions]))
 
-(s/def ::attic (strict-keys
-                :opt-un [::bedroom
-                         ::bathroom]))
 
-(s/def ::windows integer?)
-(s/def ::door boolean?)
-(s/def ::name string?)
 
-(s/def ::house (strict-keys
-                :opt-un [::windows
-                         ::attic
-                         ::bedroom
-                         ::bathroom]
-                :req-un [::name 
-                         ::door]))
-
-(s/def ::houses (s/+ ::house))
-
-(s/def ::cljsbuild
-  (strict-keys
-   :req-un [::houses]))
-
-(s/def ::root (strict-keys
-               :opt-un [::cljsbuild
-                        ::figwheel]))
-)

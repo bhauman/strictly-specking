@@ -6,30 +6,35 @@
    [strictly-specking.fuzzy :refer [similar-key]]
    [strictly-specking.parse-spec :as parse :refer [parse-keys-args spec-from-registry]]))
 
-#_(s/explain :fig-opt/builds [{:compiler 1
-                               :id 1
-                               :source-paths 2}])
 
-;; TODO make knobs for strict-keys conform
-;; strictly-specking.core/*strict-keys-behavior* true, falsey, or {:spelling true :replacement true :only-warn false}
+(def
+  ^{:dynamic true
+    :doc
+    "The *strict-level* can be bound to either 
+    :ignore - ignore any unknown key problems
+    :warn   - warn on unknown keys 
+  or the default
+    :fail   - have the spec fail with an unknown-key explanation" }
+  *unknown-key-level*
+  :fail)
 
 ;; similar key implementation
 ;; this can be improved based on the size of the word
 ;; TODO improve this by looking at the implementation in type_check.clj
 ;; TODO perhaps steal the algorithm in clojurescript
 
-;; TODO fuzzy-conform-helper may not need to be a part of the strict keys spec object and it could be made
-;; stronger by using the new spec/describe traversing code (ie we can get all the keys for any given spec now)
+;; TODO fuzzy-conform-helper may not need to be a part of the strict
+;; keys spec object and it could be made stronger by using the new
+;; spec/describe traversing code (ie we can get all the keys for any
+;; given spec now)
 
 ;; TODO memoization of fuzzy-conform-helper on a per call basis
-;; TODO extract the find key path behavior into its own file
-;; TODO extract strict-keys into its own file
 
 (defn spelling-suggestions [kys ky]
+  "asdf"
   (->> kys
        (map (juxt identity #(similar-key ky %)))
        (filter second)))
-
 
 (defprotocol FuzzySpec
   (fuzzy-conform-score [_ x]))
@@ -301,7 +306,30 @@
 
   )
 
+(defmulti conform-at-level (fn [& args] @#'*unknown-key-level*))
 
+(defmethod conform-at-level :default [_ x strict keys-spec known-keys]
+  (let [result (s/conform* keys-spec x)]
+    (if (and (not= :clojure.spec/invalid result)
+             (s/valid? strict x))
+      result
+      :clojure.spec/invalid)))
+
+(defmethod conform-at-level :warn [_ x strict keys-spec known-keys]
+  (let [result (s/conform* keys-spec x)]
+    (when (and
+           (map? x)
+           (not (s/valid? strict x)))
+      (when-let [unknown-keys (not-empty (filter (complement known-keys) (keys x)))]
+        (println "Strict Keys Spec Warning: Unknown Keys"
+                 (pr-str (vec unknown-keys))
+                 "found in map"
+                 (pr-str x))
+        (println "The only known keys are" (pr-str known-keys))))
+    result))
+
+(defmethod conform-at-level :ignore [_ x strict keys-spec known-keys]
+  (s/conform* keys-spec x))
 
 ;; strict-keys
 
@@ -316,20 +344,15 @@
       (fuzzy-conform-score [_ x]
         (fuzzy-conform-score-helper spec-key-data x))
       clojure.spec/Spec
-      (conform* [_ x]
-        (let [result (s/conform* keys-spec x)]
-          (if (and (not= :clojure.spec/invalid result)
-                   (s/valid? strict x))
-            result
-            :clojure.spec/invalid)))
+      (conform* [self x]
+        (conform-at-level self x strict keys-spec known-keys))
       (unform* [_ x] (s/unform* keys-spec x))
       (explain* [_ path via in x]
         (not-empty
          (vec
           (concat
            (s/explain* keys-spec path via in x)
-           (when (map? x)
-             ;; there should only be one
+           (when (and (map? x) (not (#{:warn :ignore} *unknown-key-level*)))
              (when-let [exp-data (first (s/explain* strict path via in x))]
                (when (map? (:val exp-data))
                  (->> (keys (:val exp-data))
@@ -339,30 +362,10 @@
                          (assoc exp-data
                                 :path (conj (:path exp-data) :unknown-key unknown-key)
                                 :strictly-specking.core/keys->specs keys->specs
-                                :strictly-specking.core/unknown-key unknown-key))
-                       #_(fn [unknown-key]
-                         (if-let [suggest (spelling-suggestion spec-key-data x unknown-key)]
-                           (assoc exp-data
-                                  :path (conj (:path exp-data) :misspelled-key unknown-key)
-                                  :strictly-specking.core/misspelled-key unknown-key
-                                  :strictly-specking.core/correct-key suggest
-                                  :strictly-specking.core/correct-key-spec (k->s suggest))
-                           (if-let [replace-suggest
-                                    (replacement-suggestion spec-key-data x unknown-key)]
-                             (assoc exp-data
-                                    :path (conj (:path exp-data) :wrong-key unknown-key)
-                                    :strictly-specking.core/wrong-key unknown-key
-                                    :strictly-specking.core/correct-key replace-suggest
-                                    :strictly-specking.core/correct-key-spec (k->s replace-suggest))
-                             (assoc exp-data
-                                    :path (conj (:path exp-data) :unknown-key unknown-key)
-                                    :strictly-specking.core/unknown-key unknown-key)))))))))))))
+                                :strictly-specking.core/unknown-key unknown-key)))))))))))
       ;; These can be improved
       (gen* [_ a b c]
         (s/gen* keys-spec a b c))
       (with-gen* [_ gfn]
         (s/with-gen* keys-spec gfn))
-      (describe* [_] (cons 'strict-keys (rest (s/describe* keys-spec))))
-      
-      )
-    ))
+      (describe* [_] (cons 'strict-keys (rest (s/describe* keys-spec)))))))

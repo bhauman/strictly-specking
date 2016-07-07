@@ -6,13 +6,14 @@
                                    strict-keys
                                    attach-reason
                                    attach-warning
-                                   non-blank-string?] :as ss]
+                                   non-blank-string?
+                                   reset-duplicate-keys]]
    [clojure.test :refer [deftest is testing]]))
 
 #_ (remove-ns 'strictly-specking.cljs-options-schema)
 
 ;; for development
-(ss/reset-duplicate-keys)
+(reset-duplicate-keys)
 
 ;; * Specification for ClojureScript
 ;; ** Top level util specs

@@ -3,6 +3,10 @@
    [clojure.string :as str]
    [clansi.core :as ansi]))
 
+;; I really prefer false as the default
+;; I may just inline clansi here
+#_(alter-var-root #'clansi.core/*use-ansi* (constantly false))
+
 (defmacro with-ansi-when [b & body]
   `(if ~b
      (ansi/with-ansi ~@body)
