@@ -3,8 +3,8 @@
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [#_[org.clojure/clojure "1.9.0-alpha8"]
-                 [org.clojure/clojure "1.6.0"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha8"]
+                 #_[org.clojure/clojure "1.6.0"]
                  [net.cgrand/sjacket  "0.1.1"
                   :exclusions [org.clojure/clojure]]
                  [myguidingstar/clansi "1.3.0"
@@ -12,7 +12,8 @@
 
   :profiles {:dev {:source-paths ["dev" "src"]
                    :aliases
-                   {"standalone" ["run" "-m" "strictly-specking-tasks.core" ":standalone"]}}}
+                   {"standalone" ["run" "-m" "strictly-specking-tasks.core" ":standalone"]}
+                   {"with-spec" ["run" "-m" "strictly-specking-tasks.core" ":with-clojure-spec"]}}}
   
   ;; just to test project parsing
   :cljsbuild {:assert true
