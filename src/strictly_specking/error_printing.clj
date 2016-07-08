@@ -178,7 +178,7 @@
                         (map (fn [[k message]]
                                [k
                                 (merge {:key-colors     [:error-key]
-                                        :value-colors   [:reset]
+                                        :value-colors   [:none]
                                         :comment-colors [:pointer]
                                         ;; TODO parameterize what to fill in
                                         ;; only when needed
