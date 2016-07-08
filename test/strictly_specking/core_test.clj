@@ -178,9 +178,9 @@
            '{:in-path (:source-paths), :error-focus :key, :missing-key true}))
     (is (= (::ss/missing-keys e)
            [:source-paths :compiler]))
-    (is (= (ss/keys-to-document e)
-           [:strictly-specking.test-schema/compiler
-            :strictly-specking.test-schema/source-paths]))
+    (is (= (sort (ss/keys-to-document e))
+           (sort [:strictly-specking.test-schema/compiler
+                  :strictly-specking.test-schema/source-paths])))
     (is (ep/error-message e))
     ;; there is no inline message
     ;; (is (ep/inline-message e))
