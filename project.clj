@@ -7,11 +7,6 @@
                  [net.cgrand/sjacket  "0.1.1"
                   :exclusions [org.clojure/clojure]]]
 
-  :profiles {:dev {:source-paths ["dev" "src"]
-                   :aliases
-                   {"standalone" ["run" "-m" "strictly-specking-tasks.core" ":standalone"]
-                    "with-spec" ["run" "-m" "strictly-specking-tasks.core" ":with-clojure-spec"]}}}
-  
   ;; just to test project parsing
   :cljsbuild {:assert true
               :builds [{ :id "example-admin"
