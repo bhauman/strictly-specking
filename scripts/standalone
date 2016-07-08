@@ -1,7 +1,9 @@
 #!/bin/bash
 
-sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e 's/clojure.spec/strictly-specking-standalone.spec/g' test/strictly_specking/*.clj
+sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e 's/clojure.spec/strictly-specking-standalone.spec/g' test/strictly_specking/*.clj src/strictly_specking/*.clj
+
 # rm test/strictly_specking/*.bak
+# rm src/strictly_specking/*.bak
 #mv test/strictly_specking test/strictly_specking_standalone
 
 #sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e 's/clojure.spec/strictly-specking-standalone.spec/g' src/strictly_specking/*.clj
