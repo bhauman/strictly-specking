@@ -1,4 +1,5 @@
 #!/bin/bash
+cd /Users/bhauman/workspace/specly
 
 sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e 's/clojure.spec/strictly-specking-standalone.spec/g' test/strictly_specking/*.clj src/strictly_specking/*.clj
 rm test/strictly_specking/*.bak rm src/strictly_specking/*.bak
