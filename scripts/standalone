@@ -1,8 +1,8 @@
 #!/bin/bash
 cd /Users/bhauman/workspace/specly
 
-sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e 's/clojure.spec/strictly-specking-standalone.spec/g' test/strictly_specking/*.clj src/strictly_specking/*.clj
-rm test/strictly_specking/*.bak rm src/strictly_specking/*.bak
+sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e 's/clojure.spec/strictly-specking-standalone.spec/g' test/strictly_specking/*.clj src/strictly_specking/*.clj dev-resources/test_specs/*.clj
+rm test/strictly_specking/*.bak src/strictly_specking/*.bak dev-resources/test_specs/*.bak
 
 mv test/strictly_specking test/strictly_specking_standalone
 mv src/strictly_specking src/strictly_specking_standalone
