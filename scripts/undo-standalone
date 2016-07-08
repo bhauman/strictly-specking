@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#mv test/strictly_specking_standalone test/strictly_specking
-#mv src/strictly_specking_standalone src/strictly_specking
+mv test/strictly_specking_standalone test/strictly_specking
+mv src/strictly_specking_standalone src/strictly_specking
 
 sed -i.bak -e 's/strictly-specking-standalone.spec/clojure.spec/g' -e 's/strictly-specking-standalone/strictly-specking/g' test/strictly_specking/*.clj src/strictly_specking/*.clj
 
