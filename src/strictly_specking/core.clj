@@ -1,6 +1,5 @@
 (ns strictly-specking.core
   (:require
-   [clansi.core :refer [with-ansi without-ansi]]
    [clojure.pprint :as pp]
    [clojure.set :as set]
    [clojure.spec :as s]
@@ -1076,48 +1075,53 @@ of thie error element."
 
 ;; * actually printing of the error
 
-(defn test-print [error-data]
-  (println (color "---------------------------------\n" :header))
-  (println (:message error-data))
-  (println "\n")
-  ;; could should indent this
-  (println (:error-in-context error-data))
-  (println "\n")
-  (when (:extra-explain error-data)
-    (println (:extra-explain error-data))
-    (println "\n"))
-  (when (:extra-diagram error-data)
-    (println (:extra-diagram error-data))
-    (println "\n"))
-  (when (:extra-extra-explain error-data)
-    (println (:extra-extra-explain error-data))
-    (println "\n"))
-  #_(println "Docs " (prn (:doc-keys error-data)))
-  (when (not-empty (:docs error-data))
-    (doseq [[ky doc] (:docs error-data)]
-      (println "-- Docs for key" (pr-str (keyword (name ky)))"--")
-      (println doc)
-      (println "\n")))
-  (doseq [[k v] error-data
-          :when (not (#{:message :error-in-context :extra-explain :extra-diagram
-                        :extra-extra-explain :docs :final-notes
-                        :path :error :doc-keys}
-                      k))]
-    (println "--" (pr-str k) "--")
-    (println v)
-    (println "\n"))
-  (when (:final-notes error-data)
-    (println (:final-notes error-data))
-    (println "\n"))
-  (println (color "---------------------------------\n" :footer)))
+(defn test-print
+  ([error-data] (test-print error-data nil))
+  ([error-data header-str]
+   (println (color (str "------" (if header-str (str " " header-str " ")
+                                     (apply str (repeat 30 \-)))
+                        "------")
+                   :header))
+   (println "")
+   (println (:message error-data))
+   (println "")
+   ;; could should indent this
+   (println (:error-in-context error-data))
+   #_(println "")
+   (when (:extra-explain error-data)
+     (println (:extra-explain error-data))
+     (println ""))
+   (when (:extra-diagram error-data)
+     (println (:extra-diagram error-data))
+     (println ""))
+   (when (:extra-extra-explain error-data)
+     (println (:extra-extra-explain error-data))
+     (println ""))
+   #_(println "Docs " (prn (:doc-keys error-data)))
+   (when (not-empty (:docs error-data))
+     (doseq [[ky doc] (:docs error-data)]
+       (println "-- Docs for key" (pr-str (keyword (name ky))) "--")
+       (println doc)
+       (println "")))
+   (doseq [[k v] error-data
+           :when (not (#{:message :error-in-context :extra-explain :extra-diagram
+                         :extra-extra-explain :docs :final-notes
+                         :path :error :doc-keys}
+                       k))]
+     (println "--" (pr-str k) "--")
+     (println v)
+     (println ""))
+   (when (:final-notes error-data)
+     (println (:final-notes error-data))
+     (println ""))
+   (println (color "---------------------------------" :footer))))
 
 (defn dev-print [explain-data data-to-test file-name]
-  (without-ansi
-    (->> 
-     (prepare-errors explain-data data-to-test file-name)
-     (map error->display-data)
-     #_(take 1)
-     (mapv test-print))))
+  (->> 
+   (prepare-errors explain-data data-to-test file-name)
+   (map error->display-data)
+   #_(take 1)
+   (mapv test-print)))
 
 ;; * additional specs
 

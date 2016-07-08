@@ -6,8 +6,6 @@
   :dependencies [[org.clojure/clojure "1.9.0-alpha8"]
                  #_[org.clojure/clojure "1.6.0"]
                  [net.cgrand/sjacket  "0.1.1"
-                  :exclusions [org.clojure/clojure]]
-                 [myguidingstar/clansi "1.3.0"
                   :exclusions [org.clojure/clojure]]]
 
   :profiles {:dev {:source-paths ["dev" "src"]

@@ -1,6 +1,6 @@
 (ns strictly-specking.context-print
   (:require
-   [clansi.core :as ansi]
+   [strictly-specking.ansi-util :refer [color]]
    [clojure.java.io :as io]
    [clojure.string :as string]))
 
@@ -91,14 +91,14 @@
      formatted-lines)))
 
 (def default-line-colors
-  {:error-line   :bright
+  {:error-line   :bold
    :message-line :magenta
    :line-number  :cyan
    :line         nil})
 
-(defn style-when [l color]
-  (if (and color l)
-    (ansi/style l color)
+(defn style-when [l colr]
+  (if (and colr l)
+    (color l colr)
     l))
 
 (defn color-lines
@@ -137,7 +137,7 @@
   (-> (fetch-lines file)
       number-lines
       (insert-message line column message)
-      (extract-range-from-center line 10)
+      (extract-range-from-center line 5)
       trim-blank-lines
       blank-space-trim
       format-line-numbers
