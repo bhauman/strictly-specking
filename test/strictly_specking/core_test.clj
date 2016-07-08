@@ -1,7 +1,6 @@
 (ns strictly-specking.core-test
   (:require [clojure.test :refer :all]
             [clojure.string :as string]
-            [clansi.core :refer [without-ansi]]
             [strictly-specking.path-matching :as path-match]
             [strictly-specking.core :as ss]
             [strictly-specking.error-printing :as ep]
@@ -81,7 +80,7 @@
     (is (= (ss/keys-to-document err)
            [::t/css-dirs]))
     (is
-     (.contains (with-out-str (without-ansi (ep/pprint-inline-message err)))
+     (.contains (with-out-str (ep/pprint-inline-message err))
                 ":css-dirs"))
     (is (= (ss/keys-to-document err)
            [::t/css-dirs])) 
