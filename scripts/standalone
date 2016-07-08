@@ -1,16 +1,26 @@
 #!/bin/bash
 cd /Users/bhauman/workspace/specly
 
+if [ -d "src/strictly_specking_standalone" ]; then
+    echo 'Error:: already a standalone!!!'
+    exit 1 
+fi
+
 sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e 's/clojure.spec/strictly-specking-standalone.spec/g' test/strictly_specking/*.clj src/strictly_specking/*.clj dev-resources/test_specs/*.clj
 rm test/strictly_specking/*.bak src/strictly_specking/*.bak dev-resources/test_specs/*.bak
 
 mv test/strictly_specking test/strictly_specking_standalone
-mv src/strictly_specking src/strictly_specking_standalone
+mv src/strictly_specking src/strictly_specking_standalone 
+
+mkdir -p src/strictly_specking_standalone/spec
+cp dev-resources/1.6_compat_spec/spec.clj src/strictly_specking_standalone/spec.clj
+cp dev-resources/1.6_compat_spec/spec/gen.clj src/strictly_specking_standalone/spec/gen.clj
+
 
 #sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e 's/clojure.spec/strictly-specking-standalone.spec/g' src/strictly_specking/*.clj
 # rm src/strictly_specking/*.bak
 #mv src/strictly_specking src/strictly_specking_standalone
 
-#sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e  src/1.6_compat_spec/spec.clj src/1.6_compat_spec/spec/gen.clj
+#sed -i.bak -e 's/strictly-specking/strictly-specking-standalone/g' -e  dev-resources/1.6_compat_spec/spec.clj dev-resources/1.6_compat_spec/spec/gen.clj
 
 

@@ -6,10 +6,10 @@
 ;   the terms of this license.
 ;   You must not remove this notice, or any other, from this software.
 
-(ns strictly-specking.spec
+(ns strictly-specking-standalone.spec
   (:refer-clojure :exclude [+ * and or cat def keys merge ident? indexed? int? bounded-count])
   (:require [clojure.walk :as walk]
-            [strictly-specking.spec.gen :as gen]
+            [strictly-specking-standalone.spec.gen :as gen]
             [clojure.string :as str]))
 
 (alias 'c 'clojure.core)
@@ -691,7 +691,7 @@
                  :sym symbol?)
     :ret symbol?)"
   [fn-sym & specs]
-  `(strictly-specking.spec/def ~fn-sym (strictly-specking.spec/fspec ~@specs)))
+  `(strictly-specking-standalone.spec/def ~fn-sym (strictly-specking-standalone.spec/fspec ~@specs)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; impl ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn- recur-limit? [rmap id path k]
@@ -1573,8 +1573,8 @@
      (describe* [_] `(fspec :args ~aform :ret ~rform :fn ~fform)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; non-primitives ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(strictly-specking.spec/def ::any (spec (constantly true) :gen gen/any))
-(strictly-specking.spec/def ::kvs->map (conformer #(zipmap (map ::k %) (map ::v %)) #(map (fn [[k v]] {::k k ::v v}) %)))
+(strictly-specking-standalone.spec/def ::any (spec (constantly true) :gen gen/any))
+(strictly-specking-standalone.spec/def ::kvs->map (conformer #(zipmap (map ::k %) (map ::v %)) #(map (fn [[k v]] {::k k ::v v}) %)))
 
 (defmacro keys*
   "takes the same arguments as spec/keys and returns a regex op that matches sequences of key/values,
@@ -1591,7 +1591,7 @@
   user=> (s/conform (s/cat :i1 integer? :m (s/keys* :req-un [::a ::c]) :i2 integer?) [42 :a 1 :c 2 :d 4 99])
   {:i1 42, :m {:a 1, :c 2, :d 4}, :i2 99}"
   [& kspecs]
-  `(strictly-specking.spec/& (* (cat ::k keyword? ::v ::any)) ::kvs->map (keys ~@kspecs)))
+  `(strictly-specking-standalone.spec/& (* (cat ::k keyword? ::v ::any)) ::kvs->map (keys ~@kspecs)))
 
 (defmacro nilable
   "returns a spec that accepts nil and values satisfiying pred"

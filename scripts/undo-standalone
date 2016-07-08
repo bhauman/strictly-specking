@@ -1,8 +1,22 @@
 #!/bin/bash
 cd /Users/bhauman/workspace/specly
 
+if [ -d "src/strictly_specking" ]; then
+    echo "Error:: already a not a standalone!!!!"
+    exit 1 
+fi
+
+rm src/strictly_specking_standalone/spec/gen.clj
+rmdir src/strictly_specking_standalone/spec
+rm src/strictly_specking_standalone/spec.clj
+
 mv test/strictly_specking_standalone test/strictly_specking
+
 mv src/strictly_specking_standalone src/strictly_specking
+
+if [ -d "src/strictly_specking_standalone" ]; then
+    rmdir src/strictly_specking_standalone 
+fi
 
 sed -i.bak -e 's/strictly-specking-standalone.spec/clojure.spec/g' -e 's/strictly-specking-standalone/strictly-specking/g' test/strictly_specking/*.clj src/strictly_specking/*.clj dev-resources/test_specs/*.clj
 
