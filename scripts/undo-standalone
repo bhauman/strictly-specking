@@ -6,6 +6,9 @@ if [ -d "src/strictly_specking" ]; then
     exit 1 
 fi
 
+sed -i.bak -e 's|\[org.clojure/clojure \".*\"\]|[org.clojure/clojure "1.9.0-alpha8"]|' project.clj
+rm project.clj.bak
+
 rm src/strictly_specking_standalone/spec/gen.clj
 rmdir src/strictly_specking_standalone/spec
 rm src/strictly_specking_standalone/spec.clj
@@ -18,7 +21,7 @@ if [ -d "src/strictly_specking_standalone" ]; then
     rmdir src/strictly_specking_standalone 
 fi
 
-sed -i.bak -e 's/strictly-specking-standalone.spec/clojure.spec/g' -e 's/strictly-specking-standalone/strictly-specking/g' test/strictly_specking/*.clj src/strictly_specking/*.clj dev-resources/test_specs/*.clj
+sed -i.bak -e 's/strictly-specking-standalone.spec/clojure.spec/g' -e 's/strictly-specking-standalone/strictly-specking/g' test/strictly_specking/*.clj src/strictly_specking/*.clj dev-resources/test_specs/*.clj project.clj
 
-rm test/strictly_specking/*.bak src/strictly_specking/*.bak dev-resources/test_specs/*.bak
+rm test/strictly_specking/*.bak src/strictly_specking/*.bak dev-resources/test_specs/*.bak project.clj.bak
 
