@@ -1,0 +1,7 @@
+#!/bin/bash
+
+sed -i.bak -e 's/strictly-specking-standalone.spec/clojure.spec/g' -e 's/strictly-specking-standalone/strictly-specking/g' src/1.6_compat_spec/spec.clj src/1.6_compat_spec/spec/gen.clj
+
+
+
+
