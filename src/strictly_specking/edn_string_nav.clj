@@ -30,9 +30,11 @@
 (def symbol-node?  (partial node-test :symbol))
 
 (defn is-keyword? [k n]
-  (and (keyword-node? n)
-       (= (get-in n [:content 1 :content])
-          [(name k)])))
+  (and
+   (keyword? k)
+   (keyword-node? n)
+   (= (get-in n [:content 1 :content])
+      [(name k)])))
 
 (defn is-project? [n]
   (and (name-node? n)
