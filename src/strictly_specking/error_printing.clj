@@ -9,6 +9,24 @@
 
 #_(remove-ns 'strictly-specking.error-printing)
 
+;; helpers from core
+;; TODO move these to their own namespace or make functions in this ns
+;; take the needed parameters
+
+(defn error-in-path [e]
+  (-> e :strictly-specking.core/error-path :in-path))
+
+(defn error-path-parent
+  "Given an error with an ::error-path return the path to the parent collection
+of thie error element."
+  [e]
+  (-> e error-in-path butlast (or [])))
+
+(defn error-key
+  "Given an error with an ::error-path returh the key that this error is on."
+  [e]
+  (-> e error-in-path last))
+
 ;; ** error-message function
 ;; this will provide a more meaningful description of whats gone wrong
 ;; will delegete to a ns/key based error message if available
@@ -126,25 +144,16 @@
       (str "\n" (indent-lines 2 formatted))
       formatted)))
 
-
-
-;; *** TODO figure out how to identify where to point to
-
-;; we need to abstract how we choose a key for a given error
-;; might not need this yet
-
 (defmulti error-message :strictly-specking.core/error-type)
 
 (defmethod error-message :default [e]
   (message-default-str e #_(select-keys e [:pred :path :val :reason :via :in])))
 
-
-
 ;; *** TODO: fill in the rest of the error types
 
 (defmulti inline-message :strictly-specking.core/error-type)
 
-(defmethod inline-message :default [e] (str "The key " (-> e :in last) " has a problem"))
+(defmethod inline-message :default [e] (str "The key " (error-key e) " has a problem"))
 
 #_(defmethod inline-message ::missing-required-keys [e]
   (str "XXXXX "
@@ -218,6 +227,8 @@
         (pprint-in-file (:strictly-specking.core/file-source e) base-path key-message-map))
      (pprint-sparse-path (:strictly-specking.core/root-data e) base-path key-message-map colors))))
 
+
+;; TODO should move this up to strictly specking core
 ;; *** pprint inline message
 ;;
 ;; this should dispatch and display in file context if there is file
@@ -243,13 +254,14 @@
         (rest r))))))
 
 (defn inline-missing-keys? [e]
-  (let [m (get-in (:strictly-specking.core/root-data e)
-                  (-> e :strictly-specking.core/error-path :in-path butlast (or [])))]
+  (let [parent-path (error-path-parent e)
+        m (get-in (:strictly-specking.core/root-data e)
+                  parent-path)]
     (when (<= 2 (count m))
       (let [[first-key second-key] (keys m)
-            loc-data1 (edn-string-nav/get-path-in-clj-file (conj (vec (:in e)) first-key)
+            loc-data1 (edn-string-nav/get-path-in-clj-file (conj (vec parent-path) first-key)
                                                            (:strictly-specking.core/file-source e))
-            loc-data2 (edn-string-nav/get-path-in-clj-file (conj (vec (:in e)) second-key)
+            loc-data2 (edn-string-nav/get-path-in-clj-file (conj (vec parent-path) second-key)
                                                            (:strictly-specking.core/file-source e))]
         (when (not= (:line loc-data1) (:line loc-data2))
           loc-data1)))))
@@ -274,8 +286,8 @@
             cp/print-formatted-lines)
         true)
       (pprint-in-file (:strictly-specking.core/file-source e)
-                      (butlast (:in e))
-                      {(last (:in e))
+                      (error-path-parent e)
+                      {(error-key e)
                        (str "Map is missing required key"
                             (if (= 1 (count (:strictly-specking.core/missing-keys e)))
                               (str ": " (pr-str (first (:strictly-specking.core/missing-keys e))))

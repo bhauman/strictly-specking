@@ -54,10 +54,25 @@
   (-> (s/explain-data sp v) ::s/problems first
       (assoc ::ss/root-data v)))
 
-(defn prep-e [sp v]
-  (let [res (ss/prepare-errors (s/explain-data sp v) v nil)]
-    (assert (= 1 (count res)))
-    (first res)))
+(defn prep-e
+  ([sp v file]
+   (let [res (ss/prepare-errors (s/explain-data sp v) v file)]
+     #_(prn res)
+     #_(prn (count res))
+     #_(assert (= 1 (count res)))
+     (first res)))
+  ([sp v]
+   (prep-e sp v nil)))
+
+(defn prep-ef [sp file]
+  (prep-e sp (read-string (slurp file))
+          file))
+
+#_(prep-ef ::t/builds
+           "dev-resources/test_edn/endenly.edn")
+
+#_(ep/pprint-inline-message (prep-ef ::t/builds
+                                     "dev-resources/test_edn/endenly.edn"))
 
 (deftest bad-value-error-test
   (let [err (prep-e (s/map-of keyword? integer?) {:asdf :asdf})]
@@ -499,6 +514,12 @@
 
     )
   
+  )
+
+(comment
+
+  
+
   )
 
 
