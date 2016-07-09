@@ -5,7 +5,8 @@
    [strictly-specking.edn-string-nav :as edn-string-nav]
    [strictly-specking.context-print :as cp]
    [clojure.string :as string]
-   [clojure.pprint :as pp]))
+   [clojure.pprint :as pp]
+   [clojure.java.io :as io]))
 
 #_(remove-ns 'strictly-specking.error-printing)
 
@@ -144,6 +145,7 @@ of thie error element."
       (str "\n" (indent-lines 2 formatted))
       formatted)))
 
+
 (defmulti error-message :strictly-specking.core/error-type)
 
 (defmethod error-message :default [e]
@@ -207,12 +209,19 @@ of thie error element."
 ;; really need to move this towards the same interface as above
 ;; if there is a file on the error we will display it in context of the file
 
+(defn file-line [file line column]
+  (str (let [f (io/file file)]
+         (if (.exists f)
+           (.getAbsolutePath (io/file file))
+           f))
+       (if line (str ":" line) "") (if (and line column) (str ":" column) "")))
+
 (defn pprint-in-file [file base-path key-message-map]
   (let [[k message] (first key-message-map) 
         path        (conj (vec base-path) k)]
     (when-let [{:keys [line column value path loc]}
                (edn-string-nav/get-path-in-clj-file path file)]
-      (println "File:" (str file))
+      (println (file-line file line column))
       (cp/print-message-in-context-of-file file line column message)
       true)))
 
@@ -270,7 +279,7 @@ of thie error element."
   (if-let [{:keys [line column value path loc]}
            (inline-missing-keys? e)]
     (do
-      (println "File:" (str (:strictly-specking.core/file-source e)))
+      (println (file-line (:strictly-specking.core/file-source e) line column))
       (-> (cp/fetch-lines (:strictly-specking.core/file-source e))
           (cp/number-lines)
           (cp/insert-message line column
