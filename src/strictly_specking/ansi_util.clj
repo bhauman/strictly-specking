@@ -110,7 +110,9 @@
 #_(resolve-styles [:highlight :green])
 
 (defn color [s & styles]
-  (apply sgr s (resolve-styles styles)))
+  (if *enable-color*
+    (apply sgr s (resolve-styles styles))
+    s))
 
 #_(println (with-color (color "hi" :cyan )))
 
