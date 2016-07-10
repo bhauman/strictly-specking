@@ -104,19 +104,18 @@
 
 (deftest attach-reason-error-test
   (let [err (prep-e (ss/attach-reason "asdf" (fn [x] false)
-                                      :focus-key :asdf)
-                    {})]
+                                      :focus-path [:asdf])
+                    {:asdf []})]
     
     (is (= (::ss/error-type err)
            ::ss/attach-reason))
     (is (= (::ss/attach-reason err)
            "asdf"))
     (is (= (::ss/error-path err)
-           '{:in-path (:asdf), :error-focus :key, :missing-key true}))
+           '{:in-path (:asdf), :error-focus :key, :missing-key false}))
     (is (ep/error-message err)) 
     (is (= (ep/inline-message err) "asdf"))
     (is (not (string/blank? (with-out-str (ep/pprint-inline-message err)))))
-    
     )
 
   (let [err (prep-e ::t/compiler {:output-to "main.js"

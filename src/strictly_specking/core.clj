@@ -302,6 +302,9 @@ of thie error element."
 (defn error-focus [e]
   (-> e ::error-path :error-focus))
 
+(defn root-error-path? [e]
+  (empty? (-> e ::error-path :in-path)))
+
 ;; * error definitions
 
 ;; ** TODO go over error message base cases especially when there is no parent collection
@@ -350,15 +353,18 @@ of thie error element."
   (str "The value at key " (error-key e) " doesn't conform"))
 
 (defmethod pprint-inline-message :default [e]
-  (ep/pprint-in-context e (error-path-parent e)
-                        {(error-key e) (inline-message e)}
-                        ;; can change the colors based on focus
-                        (let [focus (error-focus e)]
-                          (if (= :key focus)
-                            {:key-colors   [:error-key]
-                             :value-colors [:none]}
-                            {:key-colors   [:highlight]
-                             :value-colors [:bad-value]}))))
+  (when-not (root-error-path? e)
+    (ep/pprint-in-context
+     e
+     (error-path-parent e)
+     {(error-key e) (inline-message e)}
+     ;; can change the colors based on focus
+     (let [focus (error-focus e)]
+       (if (= :key focus)
+         {:key-colors   [:error-key]
+          :value-colors [:none]}
+         {:key-colors   [:highlight]
+          :value-colors [:bad-value]})))))
 
 ;; ** attach reason error
 (derive ::attach-reason ::bad-value)
@@ -370,12 +376,12 @@ of thie error element."
   (when (::attach-reason err)
     (assoc err ::error-type ::attach-reason)))
 
-(defmethod error-path ::attach-reason [{:keys [val focus-key] :as err}]
-  (if focus-key
+(defmethod error-path ::attach-reason [{:keys [val focus-path] :as err}]
+  (if focus-path
     {:in-path (concat (fix-path err)
-                      (list focus-key))
+                      focus-path)
      :error-focus :key
-     :missing-key (not (get val focus-key))}
+     :missing-key (not (get-in val focus-path))}
     (default-error-path err)))
 
 (defmethod error-message ::attach-reason [e]
@@ -388,7 +394,7 @@ of thie error element."
 
 (defmethod keys-to-document ::attach-reason [e]
   (when-let [typ (last (:via e))]
-    (look-up-ns-keywords-in-spec typ (when-let [x (:focus-key e)]
+    (look-up-ns-keywords-in-spec typ (when-let [x (last (:focus-path e))]
                                        [x]))))
 
 ;; ** wrong-size-collection
@@ -546,14 +552,15 @@ of thie error element."
          (color (pr-str (error-path-parent e)) :focus-path))))
 
 (defmethod pprint-inline-message ::missing-required-keys [e]
-  (or
-   (and (::file-source e) (ep/pprint-missing-keys-in-file-context e))
-   (ep/pprint-sparse-path (::root-data e)
-                          (error-path-parent e)
-                          (into {}
-                                (map (fn [k]
-                                       [k (str "The required key " (pr-str k) " is missing")]))
-                                (::missing-keys e)))))
+  (when-not (root-error-path? e)
+    (or
+     (and (::file-source e) (ep/pprint-missing-keys-in-file-context e))
+     (ep/pprint-sparse-path (::root-data e)
+                            (error-path-parent e)
+                            (into {}
+                                  (map (fn [k]
+                                         [k (str "The required key " (pr-str k) " is missing")]))
+                                  (::missing-keys e))))))
 
 (defmethod keys-to-document ::missing-required-keys [e]
   (when-let [missing (not-empty (::missing-keys e))]
@@ -1156,12 +1163,15 @@ of thie error element."
     (unform* [_ x] (s/unform* parent-spec x))
     (explain* [_ path via in x]
       (when-let [err (first (s/explain* parent-spec path via in x))]
-        [(cond-> err
-           (::attach-reason additional-info)
-           (update-in [:reason] #(if %
-                                   (str (::attach-reason additional-info) "\n - " %)
-                                   (::attach-reason additional-info)))
-           true (merge additional-info))]))
+        (let [add-info (update-in additional-info [::attach-reason]
+                                  #(if (fn? %) (% x) %))]
+          [(cond-> err
+             (::attach-reason add-info)
+             (update-in [:reason] #(if %
+                                     (str (::attach-reason add-info)
+                                          "\n - " %)
+                                     (::attach-reason add-info)))
+             true (merge add-info))])))
     ;; These can be improved
     (gen* [_ a b c]
       (s/gen* parent-spec a b c))
@@ -1174,8 +1184,9 @@ of thie error element."
                         ~(into {::attach-reason reason}
                                (apply hash-map additional-info))))
 
-#_(s/explain-data (attach-reason "asdf" (fn [x] false)
-                               :focus-key :asdf)
+#_(s/explain-data (attach-reason (fn [x] x)
+                                 (fn [x] false)
+                                 :focus-key :asdf)
                 {})
 
 ;; ** Attach Warning Spec
