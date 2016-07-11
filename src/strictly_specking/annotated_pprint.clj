@@ -152,7 +152,7 @@ This makes it easier to override pprint functionality for certain types."
         (pprint-map-with-pointer (move-comments-into-view amap))))
     (pprint-map-with-pointer amap)))
 
-(let [pprint-message (pp/formatter-out "^---- ~5I~@{~a~^ ~_~}~0I")]
+(let [pprint-message (pp/formatter-out "^---- ~6I~@{~a~^ ~_~}~0I")]
   (defn pprint-comment-pointer [comm-point]
     (apply pprint-message (string/split (:text comm-point) #"\n"))))
 
@@ -181,7 +181,7 @@ This makes it easier to override pprint functionality for certain types."
             (pp/write-out v))
           (when (next aseq)
             (.write ^java.io.Writer *out* " ")
-            (pp/pprint-newline :linear)
+            (pp/pprint-newline (if comments? :mandatory :linear))            
             (recur (next aseq) (inc c)))))))))
 
 (defn abbrev-seq-with-pointer [pre suf a-seq comment-key-fn]
