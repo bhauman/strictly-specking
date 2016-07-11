@@ -811,7 +811,7 @@ of thie error element."
                  (path-match/filter-possbile-path-choices
                   (get (:val err) (::unknown-key err))
                   (parse/find-key-path-without-ns (first (:via err)) ky))))]
-      (let [suggested-path (path-match/best-possible-path possible-paths (::root-data err))]
+      (when-let [suggested-path (path-match/best-possible-path possible-paths (::root-data err))]
         {::suggested-path suggested-path
          ::document-keys [(-> suggested-path last :ky-spec)]}))))
 
@@ -884,7 +884,7 @@ of thie error element."
   ;; perhaps the first of :via??
   (when-let [ky (and (first (:via err)) (::unknown-key err))]
     (when-let [possible-paths (not-empty (set (sort-suggestions err)))]
-      (let [suggested-path
+      (when-let [suggested-path
             (path-match/best-possible-path possible-paths (::root-data err))]
         {::suggested-path suggested-path
          ::correct-key (-> suggested-path last :ky)

@@ -292,6 +292,26 @@
 
   )
 
+(deftest misplaced-key-test-no-suggested-path
+  (let [v {:figwheel {:css-dirs ["asd"]}
+           :cljsbuild
+           {:builds
+            {:dev
+             {:source-paths ["src"]
+              :figwheel
+               {:websocket-host "localhost"
+                :on-jsload      'example.core/fig-reload
+                :on-message     'example.core/on-message
+                :css-dirs ["asdf"]
+                :debug true}
+              :compiler { :source-map true
+                          :output-to "main.js"}}}}}
+        e (prep-e :strictly-specking.test-schema/lein-project-with-cljsbuild v)]
+    (is (= (::ss/error-type e)
+           ::ss/unknown-key))
+    (is (= (::ss/unknown-key e)
+           :css-dirs))))
+
 (deftest misplaced-misspelled-key-test
   (let [v {:cljsbuild
            {:builds
