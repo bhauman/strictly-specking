@@ -659,9 +659,10 @@ of thie error element."
   (str "Found unrecognized key " (color (pr-str (::unknown-key e)) :error-key)
        " at path " (color (pr-str (error-path-parent e)) :focus-path) "\n"
        ;; doesn't work when there is only one key
-       (if (= 1 (count pred))
-         (str "The only allowed key is: " (pr-str (first pred)) )
-         (str "Must be one of: " (ep/format-seq-with-or pred)))))
+       (let [pred (second pred)]
+         (if (= 1 (count pred))
+           (str "The only allowed key is: " (pr-str (first pred)))
+           (str "Must be one of: " (ep/format-seq-with-or pred))))))
 
 (defmethod inline-message ::unknown-key [e]
   (str "The key " (::unknown-key e) " is unrecognized"))
