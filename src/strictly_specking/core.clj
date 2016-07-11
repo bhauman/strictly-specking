@@ -377,11 +377,11 @@ of thie error element."
     (assoc err ::error-type ::attach-reason)))
 
 (defmethod error-path ::attach-reason [{:keys [val focus-path] :as err}]
-  (if focus-path
+  (if-let [fp (and focus-path (if (fn? focus-path) (focus-path val) focus-path))] 
     {:in-path (concat (fix-path err)
-                      focus-path)
+                      fp)
      :error-focus :key
-     :missing-key (not (get-in val focus-path))}
+     :missing-key (not (get-in val fp))}
     (default-error-path err)))
 
 (defmethod error-message ::attach-reason [e]
@@ -394,8 +394,12 @@ of thie error element."
 
 (defmethod keys-to-document ::attach-reason [e]
   (when-let [typ (last (:via e))]
-    (look-up-ns-keywords-in-spec typ (when-let [x (last (:focus-path e))]
+    (look-up-ns-keywords-in-spec typ (when-let [x (error-key e)]
                                        [x]))))
+
+#_(explain-data (attach-reason "asdf" (constantly false) :focus-path
+                               [:asd])
+                {:asdf {:hey 1}})
 
 ;; ** wrong-size-collection
 
@@ -437,15 +441,11 @@ of thie error element."
   (str "The collection is too small"))
 
 (comment
-  (let [data {:data-key []}
-        errs (s/explain-data (s/map-of keyword? (s/every integer? :min-count 2))
-                             data)]
-    (dev-print errs
-               data
-               nil)
-    (prepare-errors errs
-                    data
-                    nil))
+  (binding [*explain-header* "Error Heading"]
+    (explain (s/map-of keyword? (s/every integer? :min-count 2))
+             {:data-key []}))
+
+  
   )
 
 ;; ** wrong-count-collection
@@ -1012,8 +1012,8 @@ of thie error element."
 ;; this is still rough
 ;; need a notion of a source ;; pure data vs. file source
 
-(defn prepare-errors [explain-data validated-data file]
-  (->> explain-data
+(defn prepare-errors [explain-d validated-data file]
+  (->> explain-d
        ::s/problems
        #_filter-errors
        (map #(assoc % ::root-data validated-data))
@@ -1029,6 +1029,19 @@ of thie error element."
        combined-or-key-pred
        corrections-overide-missing-required
        specific-paths-filter-general))
+
+(defn explain-data [spec data]
+  (let [data (if (instance? java.io.File data)
+               (read-string (slurp data))
+               data)]
+    (when-let [expd  (s/explain-data spec data)]
+      (when-let [errs (not-empty
+                       (prepare-errors expd data (when (instance? java.io.File data)
+                                                   (str data))))]
+        {::s/problems errs}))))
+
+#_(defn explain)
+
 
 ;; * error to final display data
 
@@ -1069,11 +1082,14 @@ of thie error element."
 (defmethod update-display-data ::misplaced-misspelled-key [disp-data]
     (misplaced-update-data disp-data))
 
+(def ^:dynamic *explain-header* nil)
+
 ;; TODO the raw line data may be more appropirate to ship over
 ;; the wire to a client
 (defn error->display-data [error]
   (update-display-data
    {:error error
+    :explain-header *explain-header*
     :message (error-message error)
     :error-in-context (with-out-str (pprint-inline-message error))
     :path (-> error ::error-path :in-path)
@@ -1082,53 +1098,75 @@ of thie error element."
 
 ;; * actually printing of the error
 
-(defn test-print
-  ([error-data] (test-print error-data nil))
-  ([error-data header-str]
-   (println (color (str "------" (if header-str (str " " header-str " ")
-                                     (apply str (repeat 30 \-)))
-                        "------")
-                   :header))
-   (println "")
-   (println (:message error-data))
-   (println "")
-   ;; could should indent this
-   (println (:error-in-context error-data))
-   #_(println "")
-   (when (:extra-explain error-data)
-     (println (:extra-explain error-data))
-     (println ""))
-   (when (:extra-diagram error-data)
-     (println (:extra-diagram error-data))
-     (println ""))
-   (when (:extra-extra-explain error-data)
-     (println (:extra-extra-explain error-data))
-     (println ""))
-   #_(println "Docs " (prn (:doc-keys error-data)))
-   (when (not-empty (:docs error-data))
-     (doseq [[ky doc] (:docs error-data)]
-       (println "-- Docs for key" (pr-str (keyword (name ky))) "--")
-       (println doc)
-       (println "")))
-   (doseq [[k v] error-data
-           :when (not (#{:message :error-in-context :extra-explain :extra-diagram
-                         :extra-extra-explain :docs :final-notes
-                         :path :error :doc-keys}
-                       k))]
-     (println "--" (pr-str k) "--")
-     (println v)
-     (println ""))
-   (when (:final-notes error-data)
-     (println (:final-notes error-data))
-     (println ""))
-   (println (color "---------------------------------" :footer))))
+(defn explain-out* [error-data]
+  (println (color (str "------" (if (:explain-header error-data)
+                                  (str " " (:explain-header error-data) " ")
+                                  (apply str (repeat 30 \-)))
+                       "------")
+                  :header))
+  (println "")
+  (println (:message error-data))
+  (println "")
+  ;; could should indent this
+  (println (:error-in-context error-data))
+  #_(println "")
+  (when (:extra-explain error-data)
+    (println (:extra-explain error-data))
+    (println ""))
+  (when (:extra-diagram error-data)
+    (println (:extra-diagram error-data))
+    (println ""))
+  (when (:extra-extra-explain error-data)
+    (println (:extra-extra-explain error-data))
+    (println ""))
+  #_(println "Docs " (prn (:doc-keys error-data)))
+  (when (not-empty (:docs error-data))
+    (doseq [[ky doc] (:docs error-data)]
+      (println "-- Docs for key" (pr-str (keyword (name ky))) "--")
+      (println doc)
+      (println "")))
+  (doseq [[k v] error-data
+          :when (not (#{:message :error-in-context :extra-explain :extra-diagram
+                        :extra-extra-explain :docs :final-notes
+                        :path :error :doc-keys
+                        :explain-header}
+                      k))]
+    (println "--" (pr-str k) "--")
+    (println v)
+    (println ""))
+  (when (:final-notes error-data)
+    (println (:final-notes error-data))
+    (println ""))
+  (println (color (str "------" (apply str (repeat 
+                                            (if (:explain-header error-data)
+                                              (+ 2 (count (:explain-header error-data)))
+                                              30)
+                                            \-))
+                       "------")
+                  :footer)))
 
+;; TODO remove temp alias for dev
+(def test-print explain-out*)
+
+;; TODO remove dev helper
 (defn dev-print [explain-data data-to-test file-name]
   (->> 
    (prepare-errors explain-data data-to-test file-name)
    (map error->display-data)
    #_(take 1)
    (mapv test-print)))
+
+(defn explain-out [ed]
+  (if ed
+    (doseq [err (map error->display-data (::s/problems ed))]
+      (explain-out* err))
+    (println "Success!")))
+
+(defn explain [spec data]
+  (explain-out (explain-data spec data)))
+
+
+
 
 ;; * additional specs
 

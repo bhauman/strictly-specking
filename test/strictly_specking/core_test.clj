@@ -116,6 +116,7 @@
     (is (ep/error-message err)) 
     (is (= (ep/inline-message err) "asdf"))
     (is (not (string/blank? (with-out-str (ep/pprint-inline-message err)))))
+
     )
 
   (let [err (prep-e ::t/compiler {:output-to "main.js"
@@ -130,7 +131,7 @@
     (is (ep/error-message err)) 
     (is (= (ep/inline-message err) ":source-map must be a boolean when :optimizations is :none"))
     (is (not (string/blank? (with-out-str (ep/pprint-inline-message err)))))
-      
+
       )
   )
 
@@ -442,14 +443,14 @@
   
   (testing "fail on attach-reason predicates"
     (is (not (s/valid? ::c/compiler-options {:output-to "main.js"
-                                           :closure-defines {'goog.DEBUG false}})))
+                                             :closure-defines {'goog.DEBUG false}})))
     (is (not (s/valid? ::c/compiler-options {:output-to "main.js"
-                                           :source-map "asdf"})))
+                                             :source-map "asdf"})))
     (is (not (s/valid? ::c/compiler-options {:output-to "main.js"
-                                           :source-map false :optimizations :advanced})))
+                                             :source-map false :optimizations :advanced})))
     
     (is (s/valid? ::c/compiler-options {:output-to "main.js"
-                                      :optimizations :advanced}))
+                                        :optimizations :advanced}))
     )
   
 )
