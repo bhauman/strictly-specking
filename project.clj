@@ -1,8 +1,10 @@
 (defproject strictly-specking "0.1.0-SNAPSHOT"
-  :description "FIXME: write description"
-  :url "http://example.com/FIXME"
+  :description "A Clojure library to help validate edn configuration data, and hopefully more"
+  :url "https://github.com/bhauman/strictly-specking"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
+  :scm {:name "git"
+        :url "https://github.com/bhauman/strictly-specking"}  
   :dependencies [[org.clojure/clojure "1.9.0-alpha8"]
                  ;; doing some juggling for 1.9.0
                  [net.cgrand/parsley "0.9.3"
