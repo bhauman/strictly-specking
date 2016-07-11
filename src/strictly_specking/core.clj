@@ -134,7 +134,7 @@ You can also provide extra meta-data
          (some #(search-for-key-in-via via %)))))
 
 (defn find-doc-keyword [e]
-  (->> e :in-path reverse (filter keyword?) first))
+  (->> e ::error-path :in-path reverse (filter keyword?) first))
 
 (defn look-up-ns-keywords-in-spec
   "Fetches the child ns-keys of a spec given the un-namespaced keys."
