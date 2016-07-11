@@ -133,14 +133,21 @@ You can also provide extra meta-data
          (filter keyword?)
          (some #(search-for-key-in-via via %)))))
 
+(defn find-doc-keyword [e]
+  (->> e :in-path reverse (filter keyword?) first))
+
 (defn look-up-ns-keywords-in-spec
   "Fetches the child ns-keys of a spec given the un-namespaced keys."
   [typ kys]
-  (when-let [desc (try (s/describe typ) (catch Throwable e nil))]
-    (when-let [path-elems (not-empty (parse/possible-child-keys typ))]
-      (->> path-elems
-           (filter (fn [{:keys [ky ky-spec]}] ((set kys) ky)))
-           (map :ky-spec)))))
+  (when-let [desc (parse/spec-from-registry typ)]
+    (->> kys
+         (filter keyword?)
+         (map #(parse/find-key-path-without-ns typ %))
+         (filter not-empty)
+         (map first)
+         (filter not-empty)         
+         (keep (comp :ky-spec last))
+         not-empty)))
 
 ;; let errors define how documentation gets looked
 ;; different errors will need different strategies
@@ -389,12 +396,11 @@ of thie error element."
        (color (pr-str (vec (:in-path (::error-path e)))) :focus-path) "\n"
        (:reason e "")))
 
-(defmethod inline-message ::attach-reason [e]
-  (:reason e " error here"))
+(defmethod inline-message ::attach-reason [e] "")
 
 (defmethod keys-to-document ::attach-reason [e]
   (when-let [typ (last (:via e))]
-    (look-up-ns-keywords-in-spec typ (when-let [x (error-key e)]
+    (look-up-ns-keywords-in-spec typ (when-let [x (find-doc-keyword e)]
                                        [x]))))
 
 #_(explain-data (attach-reason "asdf" (constantly false) :focus-path

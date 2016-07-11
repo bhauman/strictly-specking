@@ -4,8 +4,11 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.9.0-alpha8"]
+                 ;; doing some juggling for 1.9.0
+                 [net.cgrand/parsley "0.9.3"
+                  :exclusions [org.clojure/clojure]]                 
                  [net.cgrand/sjacket  "0.1.1"
-                  :exclusions [org.clojure/clojure]]]
+                  :exclusions [org.clojure/clojure net.cgrand/parsley]]]
 
   ;; just to test project parsing
   :cljsbuild {:assert true

@@ -114,7 +114,7 @@
     (is (= (::ss/error-path err)
            '{:in-path (:asdf), :error-focus :key, :missing-key false}))
     (is (ep/error-message err)) 
-    (is (= (ep/inline-message err) "asdf"))
+    (is (= (ep/inline-message err) ""))
     (is (not (string/blank? (with-out-str (ep/pprint-inline-message err)))))
 
     )
@@ -129,7 +129,7 @@
     (is (= (::ss/error-path err)
              '{:in-path (:source-map), :error-focus :key, :missing-key false}))
     (is (ep/error-message err)) 
-    (is (= (ep/inline-message err) ":source-map must be a boolean when :optimizations is :none"))
+    (is (= (ep/inline-message err) ""))
     (is (not (string/blank? (with-out-str (ep/pprint-inline-message err)))))
 
       )
