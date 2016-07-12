@@ -257,6 +257,10 @@ This makes it easier to override pprint functionality for certain types."
   (reduce #(annotate-path %1 (first %2) (second %2))
           data path-to-annotation-map))
 
+(defn pprint-notes [annotated-data]
+  (pp/with-pprint-dispatch error-path-dispatch
+      (pp/pprint annotated-data)))
+
 #_(ansi-util/with-ansi-when true
     (pp/with-pprint-dispatch error-path-dispatch
       (pp/pprint
