@@ -251,7 +251,9 @@ This makes it easier to override pprint functionality for certain types."
                                  (vary-meta % merge annotation)))))
 
 (defn annotate-path [data path annotation]
-  (update-in data path #(vary-meta % merge annotation)))
+  (if (empty? path)
+    (vary-meta data merge annotation)
+    (update-in data path #(vary-meta % merge annotation))))
 
 (defn annotate-paths [data path-to-annotation-map]
   (reduce #(annotate-path %1 (first %2) (second %2))
