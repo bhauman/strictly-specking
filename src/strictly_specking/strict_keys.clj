@@ -5,6 +5,8 @@
    [clojure.string :as string]
    [clojure.pprint :as pp]
    [strictly-specking.fuzzy :refer [similar-key]]
+   [strictly-specking.ansi-util :refer [color-text]]
+   [strictly-specking.annotated-pprint :refer [pprint-notes annotate-path]]
    [strictly-specking.parse-spec :as parse :refer [parse-keys-args spec-from-registry]]))
 
 (def
@@ -31,7 +33,6 @@
 ;; TODO memoization of fuzzy-conform-helper on a per call basis
 
 (defn spelling-suggestions [kys ky]
-  "asdf"
   (->> kys
        (map (juxt identity #(similar-key ky %)))
        (filter second)))
@@ -321,12 +322,21 @@
            (map? x)
            (not (s/valid? strict x)))
       (when-let [unknown-keys (not-empty (filter (complement known-keys) (keys x)))]
-        (println "Strict Keys Spec Warning: Unknown Keys"
-                 (pr-str (vec unknown-keys))
-                 "found in map:\n"
-                 (with-out-str (pp/pprint x)))
-        (println "The only expected keys are:\n"
-                 (with-out-str (pp/pprint known-keys)))))
+        (println (str
+                  (color-text "Strict Keys Spec Warning: Unknown Keys " :yellow)
+                  (color-text (pr-str (vec unknown-keys)) :red)
+                  (color-text " found in map:" :yellow)))
+        (pprint-notes
+         (annotate-path x []
+                        {:comments (zipmap unknown-keys
+                                           (repeat
+                                            {:comment "unknown key"
+                                             :key-colors     [:red]
+                                             :value-colors   [:none]
+                                             :comment-colors [:magenta]}))}))
+        #_(pp/pprint x)
+        (println (color-text "The only expected keys are:" :yellow))
+        (pp/pprint known-keys)))
     result))
 
 (defmethod conform-at-level :ignore [_ x strict keys-spec known-keys]
