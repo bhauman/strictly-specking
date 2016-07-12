@@ -3,6 +3,7 @@
    [clojure.set :as set]
    [clojure.spec :as s]
    [clojure.string :as string]
+   [clojure.pprint :as pp]
    [strictly-specking.fuzzy :refer [similar-key]]
    [strictly-specking.parse-spec :as parse :refer [parse-keys-args spec-from-registry]]))
 
@@ -13,7 +14,7 @@
     :ignore - ignore any unknown key problems
     :warn   - warn on unknown keys 
   or the default
-    :fail   - have the spec fail with an unknown-key explanation" }
+    :fail   - have the spec fail with an unknown-key explanation (default)" }
   *unknown-key-level*
   :fail)
 
@@ -322,9 +323,10 @@
       (when-let [unknown-keys (not-empty (filter (complement known-keys) (keys x)))]
         (println "Strict Keys Spec Warning: Unknown Keys"
                  (pr-str (vec unknown-keys))
-                 "found in map"
-                 (pr-str x))
-        (println "The only expected keys are" (pr-str known-keys))))
+                 "found in map:\n"
+                 (with-out-str (pp/pprint x)))
+        (println "The only expected keys are:\n"
+                 (with-out-str (pp/pprint known-keys)))))
     result))
 
 (defmethod conform-at-level :ignore [_ x strict keys-spec known-keys]
