@@ -1093,7 +1093,7 @@ of thie error element."
 
 (defn navigable-in-path? [error]
   (try (= (get-in (::root-data error)
-                  (-> error ::error-path :in-path))
+                  (fix-path error))
           (:val error))
        (catch Throwable e
          false)))
