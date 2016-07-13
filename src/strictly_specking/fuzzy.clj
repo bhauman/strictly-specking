@@ -28,3 +28,22 @@
            dist))))
 
 (def similar-key (partial similar-key* 3))
+
+(defn get-keylike [ky mp]
+  (if-let [val (get mp ky)]
+    [ky val]
+    (when-let [res (not-empty
+                    (sort-by
+                     #(-> % first -)
+                     (filter
+                      #(first %)
+                      (map (fn [[k v]] [(similar-key k ky)
+                                        [k v]]) mp))))]
+      (-> res first second))))
+
+(defn fuzzy-select-keys [m kys]
+  (into {} (keep #(get-keylike % m) kys)))
+
+(defn fuzzy-select-keys-and-fix [m kys]
+  (into {} (keep #(let [[_ v] (get-keylike % m)] [% v]) kys)))
+

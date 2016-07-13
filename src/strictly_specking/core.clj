@@ -1100,7 +1100,7 @@ of thie error element."
 
 ;; TODO find closest real key and print path to that
 (defn inline-message-when-valid-path [error]
-  (if (un-navigable-in-path? error)
+  (if (navigable-in-path? error)
     (with-out-str (pprint-inline-message error))
     ""))
 
