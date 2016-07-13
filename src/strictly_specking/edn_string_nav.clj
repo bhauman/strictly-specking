@@ -171,8 +171,8 @@
 
 (defn file-to-initial-position [file]
   (when-let [loc (file-to-parsed-zipper file)]
-    (if (= "project.clj" (.getName (io/file file)))
-      (find-project loc)
+    (if-let [proj (find-project loc)]
+      proj
       (find-first coll-node? loc))))
 
 (defn- sjacket->clj [value]
