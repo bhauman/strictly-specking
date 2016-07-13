@@ -334,7 +334,6 @@
                                              :key-colors     [:red]
                                              :value-colors   [:none]
                                              :comment-colors [:magenta]}))}))
-        #_(pp/pprint x)
         (println (color-text "The only expected keys are:" :yellow))
         (pp/pprint known-keys)))
     result))

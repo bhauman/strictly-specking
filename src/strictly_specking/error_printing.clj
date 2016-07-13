@@ -89,6 +89,15 @@ of thie error element."
 (defn seq-with-first [x pred]
   (and (sequential? pred) (= x (first pred))))
 
+(defn format-preds [types]
+  (let [res (mapv type-lookup->str types)]
+    (if (< (count (pr-str res)) 40)
+      (string/join " | " res)
+      (str "\n"
+           (with-out-str
+             (pp/with-pprint-dispatch pp/code-dispatch
+               (pp/pprint (vec types))))))))
+
 (defn format-predicate-str [{:keys [pred val]}]
   (cond
     (or
@@ -97,9 +106,7 @@ of thie error element."
     (str (if (every? *symbol-type-table* (rest pred))
            "It should be one of: "
            "It should satisfy one of: ")
-         (string/join " | "
-                      (map #(color % :good-pred)
-                           (map (some-fn *symbol-type-table* str) (rest pred)))))
+         (format-preds (rest pred)))
     (seq-with-first '+ pred)
     (str "It should be a non-empty sequence of: " (color
                                                    (pred-symbol->str (rest pred))

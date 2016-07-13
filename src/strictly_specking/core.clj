@@ -1091,14 +1091,30 @@ of thie error element."
 
 (def ^:dynamic *explain-header* nil)
 
+(defn navigable-in-path? [error]
+  (try (= (get-in (::root-data error)
+                  (-> error ::error-path :in-path))
+          (:val error))
+       (catch Throwable e
+         false)))
+
+;; TODO find closest real key and print path to that
+(defn inline-message-when-valid-path [error]
+  (if (un-navigable-in-path? error)
+    (with-out-str (pprint-inline-message error))
+    ""))
+
 ;; TODO the raw line data may be more appropirate to ship over
 ;; the wire to a client
 (defn error->display-data [error]
   (update-display-data
    {:error error
     :explain-header *explain-header*
-    :message (error-message error)
-    :error-in-context (with-out-str (pprint-inline-message error))
+    :message (if (navigable-in-path? error)
+               (error-message error)
+               (str "Error at " (pr-str (vec (:in error))) "\n"
+                    (error-message error)))
+    :error-in-context (inline-message-when-valid-path error)
     :path (-> error ::error-path :in-path)
     :doc-keys (keys-to-document error)
     :docs (not-empty (fetch-docs (keys-to-document error)))}))
