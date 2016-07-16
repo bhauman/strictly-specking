@@ -1,54 +1,66 @@
 (ns strictly-specking.fix-paths)
 
-(declare fix-path)
+#_(remove-ns 'strictly-specking.fix-paths)
 
-(defn fix-path-true [p data path target-val]
-  (when-let [res (fix-path data path target-val)]
-    (cons p res)))
+(defn failed-path-search [result-path]
+  (= (last result-path) ::search-failure))
 
-(defn handle-map-path [data path target-val]
-  (let [p (first path)]
-    (or (and
-         (contains? data p)
-         (or (fix-path-true p (get data p) (rest path) target-val)
-             ;; more work for the val
-             (and
-              (#{0 1} (second path))
-              (let [vv (if (= 0 (second path)) p (get data p))]
-                (fix-path-true p vv (drop 2 path) target-val)))))
-        ;; if it's a number look the tuple and call rest rest
-        (and
-         (number? p)
-         (> (count data) p) ;; key exists
-         (#{0 1} (second path))
-         (let [[k v] (nth (seq data) p)
-               vv (if (= 0 (second path)) k v)]
-           (fix-path-true k vv (drop 2 path) target-val))))))
+(defn valid-int-path? [path-elem data]
+  (and (integer? path-elem) (< path-elem (count data))))
 
-(defn handle-seq-path [data path target-val]
-  (let [p (first path)]
-    (and (number? p)
-         (> (count data) p) 
-         (fix-path-true p (nth data p) (rest path) target-val))))
+(defn first-or-longest-success [paths]
+  (or (first (filter (complement failed-path-search) paths))
+      (first (sort-by (comp - count) paths))))
 
-(defn fix-path [data path target-val]
+(declare fp)
+
+(defn flip-integer-key-ref [err [path-elem :as path] data]
+  (let [k (first (nth (seq data) path-elem))]
+        (fp err (cons k (rest path)) data)))
+
+(defn fp [err [path-elem :as path] data]
   (cond
-    (and (= '() path) (= data target-val))
-    '()
-    (= '() path)
-    false
-    (map? data)
-    (handle-map-path data path target-val)
-    (coll? data)
-    (handle-seq-path data path target-val)
-    :else false))
+    (empty? path)
+    (if (and (::check-val err) (<= (::check-val err) 3))
+      (if (= (:val err) data) [] [::search-failure])
+      [])
+    
+    (and (map? data)
+         (contains? data path-elem))
+    (let [handle-map-fn
+          (fn [tuple-data value-data]
+            (let [res (lazy-seq [(fp err (rest path) value-data)])]
+              (if (#{0 1} (second path))
+                (first-or-longest-success
+                 (cons (rest (fp (assoc err ::check-val 1) (rest path) tuple-data))
+                       res))
+                (first res))))]
+      (first-or-longest-success
+       (cons (cons path-elem
+                   (handle-map-fn (find data path-elem) (get data path-elem)))
+             ;; rare case: we have an int path-elem and a that is contained in the map
+             ;; but was actually intended to be a seq like location
+             (lazy-seq
+              (when (valid-int-path? path-elem data)
+                (let [[k v :as map-ent] (nth (seq data) path-elem)]
+                  [(cons k (handle-map-fn map-ent v))]))))))
+    
+    (and (map? data) (valid-int-path? path-elem data))
+    (flip-integer-key-ref err path data)
+    
+    (and (sequential? data) (valid-int-path? path-elem data))
+    (cons path-elem (fp (if (::check-val err)
+                          (update-in err [::check-val] inc)
+                          err)
+                        (rest path) (nth (seq data) path-elem)))
 
-;; there may be tiny ambiguous edge cases
-;; see tests
-;; {0 [0]} 
-;; {:asdf 1
-;;  1 [1]}
+    :else
+    [::search-failure]))
+
 (defn fix-error-path
   "searches for the correct path to the val in the current datastructure"
-  [{:keys [in val]} data]
-  (fix-path data in val))
+  [{:keys [in] :as err} data]
+  (let [res (fp err in data)]
+    (when-not (failed-path-search res)
+      res)))
+
