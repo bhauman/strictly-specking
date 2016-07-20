@@ -19,6 +19,10 @@
 
 #_(remove-ns 'strictly-specking.core)
 
+;; * TODO look at the base cases
+;; * TODO look at base and partial paths
+;; * TODO look adding explain to def-key
+
 ;; * TODO move to predicates load file
 
 (defn non-blank-string? [x]

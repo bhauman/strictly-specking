@@ -19,15 +19,29 @@
             (map #(identity %2) (cons nil sequence2) (range))
             sequence1)))
 
+;; this is a simple step function to determine the threshold
+;; no need to figure out the numeric function
+(defn length->thresh [k1 k2]
+  (let [len (apply min (map (comp count name) [k1 k2]))]
+    (cond
+      ;; less than 4 characters no matching
+      (<= len 4) 0
+      (=  len 5) 1
+      (<= len 6) 2
+      (<= len 11) 3
+      (<= len 20) 4
+      :else (int (* 0.2 len)))))
+
 (defn similar-key* [thresh ky ky2]
+  {:pre [(keyword? ky) (keyword? ky2)]}
+  (let [dist (levenshtein (str ky) (str ky2))]
+    (when (<= dist thresh)
+      dist)))
+
+(defn similar-key [ky ky2]
   (and (keyword? ky)
        (keyword? ky2)
-       #_(= (namespace ky) (namespace ky2))
-       (let [dist (levenshtein (str ky) (str ky2))]
-         (when (<= dist thresh)
-           dist))))
-
-(def similar-key (partial similar-key* 3))
+       (similar-key* (length->thresh ky ky2) ky ky2)))
 
 (defn get-keylike [ky mp]
   (if-let [val (get mp ky)]
