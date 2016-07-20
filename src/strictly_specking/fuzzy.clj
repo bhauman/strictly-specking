@@ -26,7 +26,7 @@
     (cond
       ;; less than 4 characters no matching
       (<= len 4) 0
-      (=  len 5) 1
+      (<= len 5) 1
       (<= len 6) 2
       (<= len 11) 3
       (<= len 20) 4
