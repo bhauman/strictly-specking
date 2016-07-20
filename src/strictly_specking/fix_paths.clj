@@ -57,6 +57,9 @@
     :else
     [::search-failure]))
 
+(defn fix-err* [{:keys [in] :as err} data]
+  (fp err in data))
+
 (defn fix-error-path
   "searches for the correct path to the val in the current datastructure"
   [{:keys [in] :as err} data]

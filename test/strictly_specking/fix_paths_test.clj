@@ -1,14 +1,14 @@
 (ns strictly-specking.fix-paths-test
   (:require [clojure.spec :as s]
             [clojure.test :refer :all]
-            [strictly-specking.fix-paths :as sfp :refer [fix-error-path]]))
+            [strictly-specking.fix-paths :as sfp :refer [fix-err* fix-error-path]]))
 
 
 (defn test-e [sp d]
   (-> (s/explain-data sp d) ::s/problems first))
 
 (defn fix-e [sp d]
-  (fix-error-path (test-e sp d) d))
+  (fix-err* (test-e sp d) d))
 
 (deftest failing-base-cases
   ;; here are some tough base cases that where fixed
