@@ -1,4 +1,4 @@
-(defproject strictly-specking "0.1.0"
+(defproject strictly-specking "0.1.1"
   :description "A Clojure library to help validate edn configuration data, and hopefully more"
   :url "https://github.com/bhauman/strictly-specking"
   :license {:name "Eclipse Public License"

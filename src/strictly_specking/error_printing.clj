@@ -223,14 +223,19 @@ of thie error element."
            f))
        (if line (str ":" line) "") (if (and line column) (str ":" column) "")))
 
+
+
 (defn pprint-in-file [file base-path key-message-map]
-  (let [[k message] (first key-message-map) 
-        path        (conj (vec base-path) k)]
-    (when-let [{:keys [line column value path loc]}
-               (edn-string-nav/get-path-in-clj-file path file)]
-      (println (file-line file line column))
-      (cp/print-message-in-context-of-file file line column message)
-      true)))
+  (try
+    (let [[k message] (first key-message-map) 
+          path        (conj (vec base-path) k)]
+      (when-let [{:keys [line column value path loc]}
+                 (edn-string-nav/get-path-in-clj-file path file)]
+        (println (file-line file line column))
+        (cp/print-message-in-context-of-file file line column message)
+        true))
+    (catch Exception e
+      false)))
 
 #_(edn-string-nav/get-path-in-clj-file [0] "tester.edn")
 
