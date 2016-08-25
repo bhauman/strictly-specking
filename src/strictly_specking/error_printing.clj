@@ -223,8 +223,6 @@ of thie error element."
            f))
        (if line (str ":" line) "") (if (and line column) (str ":" column) "")))
 
-
-
 (defn pprint-in-file [file base-path key-message-map]
   (try
     (let [[k message] (first key-message-map) 
