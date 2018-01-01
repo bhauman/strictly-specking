@@ -1,7 +1,7 @@
 (ns strictly-specking.cljs-options-schema
   (:refer-clojure :exclude [boolean?])
   (:require
-   [clojure.spec :as s]
+   [clojure.spec.alpha :as s]
    [clojure.string :as string]
    [strictly-specking.core :refer [def-key
                                    strict-keys
@@ -30,9 +30,9 @@
 
 ;; ** CLJS Compiler Options
 ;; *** Commonly used Compiler Options
-;; **** TODO Look at the use of clojure.spec/+
+;; **** TODO Look at the use of clojure.spec.alpha/+
 
-;; The clojure.spec/+ is used in favor of clojure.spec/* below.  The
+;; The clojure.spec.alpha/+ is used in favor of clojure.spec.alpha/* below.  The
 ;; assumption is that we want to look at the indivudiual use cases and
 ;; decide if an empty expression actually makes sense.
 
@@ -528,7 +528,7 @@ Only available for cljs.build.api/watch
 (def-key ::dump-core                  boolean?)
 (def-key ::emit-constants             boolean?)
 (def-key ::warning-handlers  ;; symbol, string, or fn?
-  (s/every ::s/any :min-count 1 :into [] :kind sequential?))
+  (s/every any? :min-count 1 :into [] :kind sequential?))
 (def-key ::source-map-inline          boolean?)
 (def-key ::ups-libs
   (s/every non-blank-string? :min-count 1 :into [] :kind sequential?))

@@ -117,7 +117,7 @@
   (c/and (extends? Spec (class x)) x))
 
 (defn regex?
-  "returns x if x is a (clojure.spec) regex op, else logical false"
+  "returns x if x is a (clojure.spec.alpha) regex op, else logical false"
   [x]
   (c/and (::op x) x))
 
@@ -146,7 +146,7 @@
   (c/or (the-spec s) (spec-impl ::unknown s nil nil)))
 
 (defn conform
-  "Given a spec and a value, returns :clojure.spec/invalid if value does not match spec,
+  "Given a spec and a value, returns :clojure.spec.alpha/invalid if value does not match spec,
   else the (possibly destructured) value."
   [spec x]
   (conform* (specize spec) x))
@@ -611,7 +611,7 @@
 
 (defmacro conformer
   "takes a predicate function with the semantics of conform i.e. it should return either a
-  (possibly converted) value or :clojure.spec/invalid, and returns a
+  (possibly converted) value or :clojure.spec.alpha/invalid, and returns a
   spec that uses it as a predicate/conformer. Optionally takes a
   second fn that does unform of result of first"
   ([f] `(spec-impl '~f ~f nil true))
@@ -674,7 +674,7 @@
   by calling get-spec with the var or fully-qualified symbol.
 
   Once registered, function specs are included in doc, checked by
-  instrument, tested by the runner clojure.spec.test/run-tests, and (if
+  instrument, tested by the runner clojure.spec.alpha.test/run-tests, and (if
   a macro) used to explain errors during macroexpansion.
 
   Note that :fn specs require the presence of :args and :ret specs to
@@ -1349,7 +1349,7 @@
       (case op
             ::accept nil
             nil p
-            ::amp (list* 'clojure.spec/& (op-describe p1) forms)
+            ::amp (list* 'clojure.spec.alpha/& (op-describe p1) forms)
             ::pcat (if rep+
                      (list `+ rep+)
                      (cons `cat (mapcat vector (c/or (seq ks) (repeat :_)) forms)))

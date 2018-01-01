@@ -1,8 +1,8 @@
 (ns strictly-specking.test-schema
   (:refer-clojure :exclude [boolean?])
   (:require
-   [clojure.spec :as s]
-   [strictly-specking.cljs-options-schema]
+   [clojure.spec.alpha :as s]
+   [strictly-specking.cljs-options-schema :as cljs-options-schema]
    [strictly-specking.core :refer [strict-keys
                                    def-key
                                    non-blank-string?]
@@ -277,8 +277,8 @@ Or you can specify which suffixes will cause the reloading
 (def-key ::test-commands
   (s/map-of ::string-or-named
             (s/every ::string-or-named :into [] :kind sequential?)))
-(def-key ::crossovers            (s/every ::s/any :into [] :kind sequential?))
-(def-key ::crossover-path        (s/every ::s/any :into [] :kind sequential?))
+(def-key ::crossovers            (s/every any? :into [] :kind sequential?))
+(def-key ::crossover-path        (s/every any? :into [] :kind sequential?))
 (def-key ::crossover-jar         boolean?)
 
 ;; If :cljsbuild > :builds is not present you must have :figwheel > :builds
@@ -400,7 +400,7 @@ want the figwheel client code to be injected into the build.
 
   :figwheel true")
 
-(def-key ::compiler ::strictly-specking.cljs-options-schema/compiler-options
+(def-key ::compiler ::cljs-options-schema/compiler-options
   "The options to be forwarded to the ClojureScript Compiler
 
 Please refer to
@@ -427,7 +427,7 @@ Default: nil (disabled)
 (def-key ::jar              boolean?)
 (def-key ::incremental      boolean?)
 (def-key ::assert           boolean?)
-(def-key ::warning-handlers (s/every ::s/any :min-count 1 :into [] :kind sequential?))
+(def-key ::warning-handlers (s/every any? :min-count 1 :into [] :kind sequential?))
 
 ;; **** Figwheel Client Options
 

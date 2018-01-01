@@ -1,7 +1,7 @@
 (ns strictly-specking.parse-spec
   (:require
    [clojure.set :as set]
-   [clojure.spec :as s]
+   [clojure.spec.alpha :as s]
    [strictly-specking.fuzzy :refer [similar-key]]))
 
   ;; we are dealing with a datatype
@@ -101,20 +101,6 @@
                      path-set)
       path-set)))
 
-(defn expanded-map-of-desc? [x]
-  (and (sequential? x)
-       (= (first x) 'every)
-       (even? (count (drop 2 x)))
-       (let [args (apply hash-map (drop 2 x))]
-         (or
-          (= {} (:into args))
-          (= 'map? (:clojure.spec/kind-form args))))
-       (rest (second x))))
-
-(defn handle-expanded-map-of [f desc]
-  (when-let [res (expanded-map-of-desc? desc)]
-    (poss-path f (cons 'map-of res))))
-
 ;; doesn't handle recursion
 ;; this can be refactored into a more general movement through
 ;; the structure
@@ -164,8 +150,7 @@
           'col-checker  (path-set-cons int-key (poss-path (second desc)))
           ;; need to check for every tuple
           ;; 
-          'every  (or (handle-expanded-map-of f desc)
-                      (path-set-cons int-key (poss-path (second desc))))
+          'every (path-set-cons int-key (poss-path (second desc)))
           'map-of (let [key-predicate (second desc)]
                     (path-set-cons {:ky :strictly-specking.core/pred-key
                                     :ky-pred-desc key-predicate}
@@ -264,7 +249,7 @@
 #_(s/describe :strictly-specking.test-schema/builds)
 
 
-#_(s/describe (s/every-kv keyword? ::s/any))
+#_(s/describe (s/every-kv keyword? any?))
 
 #_(find-key-path-without-ns :cljsbuild.lein-project.require-builds/cljsbuild :builds)
 

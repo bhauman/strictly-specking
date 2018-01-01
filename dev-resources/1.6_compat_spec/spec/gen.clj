@@ -190,8 +190,8 @@ gens, each of which should generate something sequential."
     (get @gen-builtins pred)))
 
 (comment
-  (require :reload 'clojure.spec.gen)
-  (in-ns 'clojure.spec.gen)
+  (require :reload 'clojure.spec.alpha.gen)
+  (in-ns 'clojure.spec.alpha.gen)
 
   ;; combinators, see call to lazy-combinators above for complete list
   (generate (one-of [(gen-for-pred integer?) (gen-for-pred string?)]))

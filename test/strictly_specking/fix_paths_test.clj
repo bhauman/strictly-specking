@@ -1,5 +1,5 @@
 (ns strictly-specking.fix-paths-test
-  (:require [clojure.spec :as s]
+  (:require [clojure.spec.alpha :as s]
             [clojure.test :refer :all]
             [strictly-specking.fix-paths :as sfp :refer [fix-err* fix-error-path]]))
 
@@ -13,9 +13,9 @@
 (deftest failing-base-cases
   ;; here are some tough base cases that where fixed
 
-  (is (= (fix-e (s/map-of keyword? ::s/any) {0 [0]})
+  (is (= (fix-e (s/map-of keyword? any?) {0 [0]})
             [0]))
-  (is (= (fix-e (s/map-of keyword? ::s/any)
+  (is (= (fix-e (s/map-of keyword? any?)
                    {:asdf 1
                     1 [1]})
             [1])))

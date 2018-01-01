@@ -1,7 +1,7 @@
 (ns strictly-specking.strict-keys
   (:require
    [clojure.set :as set]
-   [clojure.spec :as s]
+   [clojure.spec.alpha :as s]
    [clojure.string :as string]
    [clojure.pprint :as pp]
    [strictly-specking.fuzzy :refer [similar-key]]
