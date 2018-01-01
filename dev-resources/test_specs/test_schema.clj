@@ -1,8 +1,8 @@
 (ns strictly-specking.test-schema
   (:refer-clojure :exclude [boolean?])
   (:require
-   [strictly-specking.cljs-options-schema]
    [clojure.spec.alpha :as s]
+   [strictly-specking.cljs-options-schema :as cljs-options-schema]
    [strictly-specking.core :refer [strict-keys
                                    def-key
                                    non-blank-string?]
@@ -400,7 +400,7 @@ want the figwheel client code to be injected into the build.
 
   :figwheel true")
 
-(def-key ::compiler ::strictly-specking.cljs-options-schema/compiler-options
+(def-key ::compiler ::cljs-options-schema/compiler-options
   "The options to be forwarded to the ClojureScript Compiler
 
 Please refer to
