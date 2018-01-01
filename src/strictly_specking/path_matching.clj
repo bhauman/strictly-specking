@@ -91,7 +91,7 @@ fails against the current value (or doesn't even fuzzy conform.
                    (match-next (map-indexed vector data))))
          :strictly-specking.core/pred-key
          (when (and (map? data)
-                    (not= (:ky-pred-desc p) ::s/any))
+                    (not= (:ky-pred-desc p) any?))
            (concat [[(decorate-type data p)]]
                    (match-next data)))
          (and (map? data) (contains? data (:ky p))

@@ -264,7 +264,7 @@
 #_(s/describe :strictly-specking.test-schema/builds)
 
 
-#_(s/describe (s/every-kv keyword? ::s/any))
+#_(s/describe (s/every-kv keyword? any?))
 
 #_(find-key-path-without-ns :cljsbuild.lein-project.require-builds/cljsbuild :builds)
 

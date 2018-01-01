@@ -90,11 +90,11 @@
 
 ;; the spec to parse out the def-key macro arguments
 (def def-key-arg-spec (s/cat :k (s/and keyword? namespace)
-                             :spec ::s/any
+                             :spec any?
                              :doc (s/? non-blank-string?)
                              :meta-data
                              (s/* (s/cat :ky (s/and keyword? namespace)
-                                         :val ::s/any))))
+                                         :val any?))))
 
 (defmacro def-key
   "Defines a spec via clojure.spec.alpha/def, checks for duplicates, adds

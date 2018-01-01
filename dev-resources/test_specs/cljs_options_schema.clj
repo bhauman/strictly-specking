@@ -528,7 +528,7 @@ Only available for cljs.build.api/watch
 (def-key ::dump-core                  boolean?)
 (def-key ::emit-constants             boolean?)
 (def-key ::warning-handlers  ;; symbol, string, or fn?
-  (s/every ::s/any :min-count 1 :into [] :kind sequential?))
+  (s/every any? :min-count 1 :into [] :kind sequential?))
 (def-key ::source-map-inline          boolean?)
 (def-key ::ups-libs
   (s/every non-blank-string? :min-count 1 :into [] :kind sequential?))
