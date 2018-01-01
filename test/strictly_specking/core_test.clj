@@ -380,16 +380,11 @@
            :opt-un
            [::a ::b])))
 
-  (is  (parse/expanded-map-of-desc? (s/describe (s/map-of keyword? even?))))
-
   (is (= (s/describe (s/or :yep (s/map-of keyword? even?)))
          '(or :yep (map-of keyword? even?))))
 
   (is (= (s/describe (s/and (s/map-of keyword? even?)))
          '(and (map-of keyword? even?))))
-
-  (is (= (take 2 (s/describe (s/coll-of keyword?)))
-         '(every keyword?)))
 
   (is (= (s/describe (s/and (s/coll-of keyword?)))
          '(and (coll-of keyword?))))

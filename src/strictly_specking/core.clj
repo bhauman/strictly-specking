@@ -538,10 +538,12 @@ of thie error element."
 (derive ::missing-required-keys ::bad-value)
 
 (defn missing-keys? [pred]
-  (when ((every-pred sequential?
-                     #(= (first %) 'contains?)
-                     #(keyword? (last %))) pred)
-    {::missing-keys [(last pred)]}))
+  (if-let [[f _ key] (and (sequential? pred)
+                         (= `fn (first pred))
+                         (sequential? (last pred))
+                         (last pred))]
+    (if (= f `contains?)
+      {::missing-keys [key]})))
 
 (defmethod upgrade-to-error-type? ::missing-required-keys [_ {:keys [pred] :as err}]
   (when-let [merge-data (missing-keys? pred)]
