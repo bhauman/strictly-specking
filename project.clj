@@ -5,7 +5,7 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :scm {:name "git"
         :url "https://github.com/bhauman/strictly-specking"}  
-  :dependencies [[org.clojure/clojure "1.9.0-alpha8"]
+  :dependencies [[org.clojure/clojure "1.9.0"]
                  ;; doing some juggling for 1.9.0
                  [net.cgrand/parsley "0.9.3"
                   :exclusions [org.clojure/clojure]]                 

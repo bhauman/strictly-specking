@@ -5,7 +5,7 @@
             [strictly-specking.core :as ss]
             [strictly-specking.error-printing :as ep]
             [strictly-specking.parse-spec :as parse]
-            [clojure.spec :as s]))
+            [clojure.spec.alpha :as s]))
 
 #_ (remove-ns 'strictly-specking.core-test)
 

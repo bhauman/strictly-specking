@@ -1,5 +1,5 @@
 (ns strictly-specking.fix-paths-test
-  (:require [clojure.spec :as s]
+  (:require [clojure.spec.alpha :as s]
             [clojure.test :refer :all]
             [strictly-specking.fix-paths :as sfp :refer [fix-err* fix-error-path]]))
 

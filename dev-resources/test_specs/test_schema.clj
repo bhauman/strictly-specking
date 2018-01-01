@@ -1,8 +1,8 @@
 (ns strictly-specking.test-schema
   (:refer-clojure :exclude [boolean?])
   (:require
-   [clojure.spec :as s]
    [strictly-specking.cljs-options-schema]
+   [clojure.spec.alpha :as s]
    [strictly-specking.core :refer [strict-keys
                                    def-key
                                    non-blank-string?]

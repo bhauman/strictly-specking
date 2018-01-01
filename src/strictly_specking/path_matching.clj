@@ -1,6 +1,6 @@
 (ns strictly-specking.path-matching
   (:require
-   [clojure.spec :as s]
+   [clojure.spec.alpha :as s]
    [clojure.set :as set]
    [clojure.pprint :as pp]
    [strictly-specking.strict-keys :as strict-impl]))

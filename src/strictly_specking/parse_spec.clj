@@ -1,7 +1,7 @@
 (ns strictly-specking.parse-spec
   (:require
    [clojure.set :as set]
-   [clojure.spec :as s]
+   [clojure.spec.alpha :as s]
    [strictly-specking.fuzzy :refer [similar-key]]))
 
   ;; we are dealing with a datatype
